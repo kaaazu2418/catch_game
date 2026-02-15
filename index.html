@@ -40,16 +40,18 @@ body{
   align-items:center;
   background:#ddd;
   padding:10px;
-  flex-wrap:wrap;       /* 折り返し対応 */
-  gap:20px;             /* スマホ用に小さめ */
-  min-height:120px;     /* 高さ自動調整 */
+  flex-wrap:wrap;
+  gap:10px;
+  max-width:100%;
+  box-sizing:border-box;
 }
 
 .cardRow{
   display:flex;
-  flex-wrap:wrap;       /* 折り返し対応 */
+  flex-wrap:wrap;
   justify-content:center;
-  gap:20px;
+  gap:10px;
+  width:100%;
 }
 
 #result{
@@ -64,43 +66,25 @@ body{
 /* スコア・操作ボタン */
 .container{
   display:flex;
-  flex-direction:column;
-  padding:20px 10px;
-}
-
-@media(min-width:600px){
-  .container{
-    flex-direction:row;
-    justify-content:space-between;
-    padding:20px 60px;
-  }
+  flex-wrap:wrap;
+  justify-content:space-around;
+  padding:10px;
 }
 
 .player{
-  width:100%;
-  margin-bottom:15px;
-}
-
-@media(min-width:600px){
-  .player{
-    width:45%;
-    margin-bottom:0;
-  }
+  flex:1 1 45%;
+  margin-bottom:10px;
 }
 
 .items{
   display:flex;
   flex-wrap:wrap;
   justify-content:center;
-  margin-top:10px;
-  gap:10px;
+  gap:5px;
 }
 
 button{
   padding:6px;
-  background:white;
-  border:2px solid #333;
-  border-radius:8px;
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -119,9 +103,11 @@ button{
   color:red;
 }
 
+/* 画像サイズを画面幅に応じて調整 */
 img{
-  width:50px;   /* スマホ向けに縮小 */
-  height:50px;
+  width:15vw;      /* 画面幅の15% */
+  max-width:70px;  /* 最大70px */
+  height:auto;
   object-fit:contain;
 }
 </style>
