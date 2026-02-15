@@ -13,6 +13,7 @@ body{
   text-align:center;
 }
 
+/* スタート画面 */
 #startScreen{
   position:fixed;
   inset:0;
@@ -31,18 +32,24 @@ body{
   margin-top:20px;
 }
 
+/* ゲームボード */
 #board{
-  height:190px;
   border:4px solid black;
   display:flex;
   justify-content:center;
   align-items:center;
   background:#ddd;
+  padding:10px;
+  flex-wrap:wrap;       /* 折り返し対応 */
+  gap:20px;             /* スマホ用に小さめ */
+  min-height:120px;     /* 高さ自動調整 */
 }
 
 .cardRow{
   display:flex;
-  gap:60px;
+  flex-wrap:wrap;       /* 折り返し対応 */
+  justify-content:center;
+  gap:20px;
 }
 
 #result{
@@ -54,18 +61,39 @@ body{
   margin-top:10px;
 }
 
+/* スコア・操作ボタン */
 .container{
   display:flex;
-  justify-content:space-between;
-  padding:20px 60px;
+  flex-direction:column;
+  padding:20px 10px;
 }
 
-.player{ width:40%; }
+@media(min-width:600px){
+  .container{
+    flex-direction:row;
+    justify-content:space-between;
+    padding:20px 60px;
+  }
+}
+
+.player{
+  width:100%;
+  margin-bottom:15px;
+}
+
+@media(min-width:600px){
+  .player{
+    width:45%;
+    margin-bottom:0;
+  }
+}
 
 .items{
   display:flex;
-  justify-content:space-around;
-  margin-top:15px;
+  flex-wrap:wrap;
+  justify-content:center;
+  margin-top:10px;
+  gap:10px;
 }
 
 button{
@@ -73,6 +101,9 @@ button{
   background:white;
   border:2px solid #333;
   border-radius:8px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
 }
 
 .score{
@@ -89,8 +120,8 @@ button{
 }
 
 img{
-  width:70px;
-  height:70px;
+  width:50px;   /* スマホ向けに縮小 */
+  height:50px;
   object-fit:contain;
 }
 </style>
@@ -122,7 +153,6 @@ img{
 </div>
 
 <script>
-
 const items = [
   {name:"apple", color:"red"},
   {name:"dog", color:"brown"},
@@ -191,7 +221,7 @@ function makeImage(type,color){
   return div;
 }
 
-/* ===== カード生成（元ロジックそのまま） ===== */
+/* ===== カード生成 ===== */
 function generateCard(){
   if(!gameActive) return;
 
@@ -285,7 +315,6 @@ function setupButtons(){
 }
 
 setupButtons();
-
 </script>
 </body>
 </html>
