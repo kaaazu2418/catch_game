@@ -6,9 +6,15 @@
     <title>Apple-Loving Squirrel</title>
     <style>
         body { margin: 0; padding: 0; background-color: #333; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; touch-action: none; overflow: hidden; }
-        #gameWrapper { width: 100%; max-width: 400px; position: relative; background-color: #f8f9fa; height: 80vh; max-height: 600px; }
-        canvas { display: block; width: 100%; height: 100%; }
         
+        /* レイヤーを重ねるためのWrapper設定 */
+        #gameWrapper { width: 100%; max-width: 400px; position: relative; height: 80vh; max-height: 600px; }
+        
+        /* レイヤー（Canvas）を絶対配置でピッタリ重ねる */
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
+        #bgCanvas { z-index: 10; } /* 背景レイヤー（後ろ） */
+        #gameCanvas { z-index: 20; } /* ゲームレイヤー（手前・動く） */
+
         .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.85); color: white; text-align: center; z-index: 100; }
         .hidden { display: none !important; }
         
@@ -25,6 +31,7 @@
 <body>
 
 <div id="gameWrapper">
+    <canvas id="bgCanvas"></canvas>
     <canvas id="gameCanvas"></canvas>
     
     <div id="startScreen" class="screen">
@@ -56,16 +63,26 @@
     const BAD_MARK = '💣';
     const STAR_MARK = '⭐';
 
+    // ゲーム用キャンバス
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     
-    // 描画品質と速度のバランスを重視したDPR設定
+    // 背景用キャンバス
+    const bgCanvas = document.getElementById('bgCanvas');
+    const bgCtx = bgCanvas.getContext('2d');
+    
+    // スマホの高解像度対応
     const GAME_WIDTH = 400;
     const GAME_HEIGHT = 600;
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5); 
+    
     canvas.width = GAME_WIDTH * dpr;
     canvas.height = GAME_HEIGHT * dpr;
     ctx.scale(dpr, dpr);
+    
+    bgCanvas.width = GAME_WIDTH * dpr;
+    bgCanvas.height = GAME_HEIGHT * dpr;
+    bgCtx.scale(dpr, dpr);
 
     const startScreen = document.getElementById('startScreen');
     const gameOverScreen = document.getElementById('gameOverScreen');
@@ -75,23 +92,21 @@
 
     let gameState = 'START'; 
     let score = 0;
-    let frameCount = 0;
     let animationId;
     let invincibleUntil = 0;
     
-    // 時間ベースアニメーション用の変数
     let lastTime = 0;
     let itemSpawnTimer = 0;
+    let effectFrame = 0; // エフェクト用の独立したカウンター
 
     const TOTAL_LANES = 3;
     let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
 
-    const player = { lane: 1, width: 60, height: 60, color: '#007bff' };
+    const player = { lane: 1, width: 60, height: 60 };
     let items = [];
     let isLeftPressed = false;
     let isRightPressed = false;
 
-    // 音声
     const bgm = new Audio('bgm.mp3'); bgm.loop = true; bgm.volume = 0.5;
     const seApple = new Audio('apple.mp3');
     const seBomb = new Audio('bomb.mp3');
@@ -105,6 +120,14 @@
     const playerImg = new Image();
     playerImg.src = 'リス.png';
     playerImg.onload = () => { draw(); };
+
+    // --- 【追加】背景画像の読み込みと描画 ---
+    const bgImg = new Image();
+    bgImg.src = 'back.jpg'; // 背景画像を指定
+    bgImg.onload = () => {
+        // 背景は動かないので、読み込まれた時に1回だけ描画する（超軽量）
+        bgCtx.drawImage(bgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+    };
 
     function updatePlayerLane() {
         if (isLeftPressed && !isRightPressed) player.lane = 0;
@@ -140,11 +163,11 @@
 
     function initGame() {
         score = 0; 
-        frameCount = 0; 
         items = []; 
         invincibleUntil = 0;
         lastTime = performance.now();
         itemSpawnTimer = 0;
+        effectFrame = 0;
         
         isLeftPressed = false; 
         isRightPressed = false; 
@@ -168,17 +191,14 @@
         bgm.pause();
     }
 
-    // deltaTimeを受け取って処理を調整する
     function spawnItem(deltaTime) {
         let difficultyScore = Math.max(0, score);
-        
-        // フレーム数ではなく、実時間(ミリ秒)で出現間隔を管理
         let spawnIntervalMs = Math.max(200, 500 - (difficultyScore * 8)); 
         
         itemSpawnTimer += deltaTime;
         
         if (itemSpawnTimer > spawnIntervalMs) {
-            itemSpawnTimer = 0; // タイマーリセット
+            itemSpawnTimer = 0; 
             
             let targetLane = Math.floor(Math.random() * TOTAL_LANES);
             let rand = Math.random();
@@ -193,7 +213,6 @@
             else if (rand < 0.7)   { type = 'GOOD'; mark = GOOD_MARK; }
             else                   { type = 'BAD';  mark = BAD_MARK; }
             
-            // 速度の基準値（1秒間に移動するピクセル数ベース）
             let baseSpeed = 300 + (Math.random() * 150) + (difficultyScore * 10);
             
             items.push({
@@ -213,8 +232,6 @@
 
         for (let i = items.length - 1; i >= 0; i--) {
             let item = items[i];
-            
-            // 時間に基づいて移動距離を計算 (1秒 = 1000ms)
             item.y += item.speed * (deltaTime / 1000);
 
             if (item.lane === player.lane && item.y + item.size > playerY && item.y < playerY + player.height) {
@@ -235,8 +252,9 @@
     }
 
     function draw() {
-        ctx.fillStyle = '#f8f9fa';
-        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+        // --- 【変更】毎フレームの背景描画をスキップ ---
+        // 背景は bgCanvas が描画しているので、ゲーム用のCanvasは透明にしておく
+        ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
         let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
         let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
@@ -250,9 +268,10 @@
         }
 
         if (shouldDrawPlayer) {
-            // 背景のオーラエフェクトをシンプルに（shadowBlurを使わない）
             if (isInvincible) {
-                ctx.fillStyle = `hsla(${(frameCount * 15) % 360}, 100%, 50%, 0.6)`;
+                // deltaTimeで管理しているとオーラの色が変わらなくなるため、エフェクト専用フレームを加算
+                effectFrame++; 
+                ctx.fillStyle = `hsla(${(effectFrame * 5) % 360}, 100%, 50%, 0.6)`;
                 ctx.beginPath();
                 ctx.arc(playerX + player.width / 2, playerY + player.height / 2, player.width / 2 + 10, 0, Math.PI * 2);
                 ctx.fill();
@@ -261,12 +280,11 @@
             if (playerImg.complete && playerImg.naturalWidth > 0) {
                 ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
             } else {
-                ctx.fillStyle = player.color;
+                ctx.fillStyle = '#007bff';
                 ctx.fillRect(playerX, playerY, player.width, player.height);
             }
         }
 
-        // アイテムの描画（シンプルに文字として描画）
         ctx.font = '50px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
@@ -276,23 +294,22 @@
             ctx.fillText(item.mark, itemX, itemY);
         }
 
+        // スコアの背景を少し見やすくする
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillRect(5, 5, 120, 35);
         ctx.fillStyle = '#333';
         ctx.font = 'bold 24px sans-serif';
         ctx.textAlign = 'left';
-        ctx.fillText(`スコア: ${score}`, 15, 20);
+        ctx.fillText(`スコア: ${score}`, 15, 10);
     }
 
     function gameLoop(currentTime) {
         if (gameState !== 'PLAYING') return;
         
-        // Delta Time (前回のフレームからの経過時間) の計算
         let deltaTime = currentTime - lastTime;
         lastTime = currentTime;
         
-        // 異常に時間が経っていた場合（タブを裏に回していた等）の補正
         if (deltaTime > 100) deltaTime = 100;
-
-        frameCount++;
         
         spawnItem(deltaTime); 
         update(deltaTime); 
@@ -304,8 +321,6 @@
     startBtn.onclick = initGame;
     retryBtn.onclick = initGame;
     
-    // 初期描画
-    draw();
 </script>
 </body>
 </html>
