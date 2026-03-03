@@ -1,306 +1,328 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>対戦ゲーム 完全完成版</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Apple-Loving Squirrel</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #333; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; touch-action: none; overflow: hidden; }
+        #gameWrapper { width: 100%; max-width: 400px; position: relative; background-color: #f8f9fa; height: 80vh; max-height: 600px; }
+        canvas { display: block; width: 100%; height: 100%; }
+        
+        .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.85); color: white; text-align: center; z-index: 100; }
+        .hidden { display: none !important; }
+        
+        /* タイトルロゴ風の装飾 */
+        h1 { font-size: 28px; color: #ffeb3b; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 10px; }
+        
+        button { padding: 15px 30px; font-size: 20px; font-weight: bold; cursor: pointer; border: none; border-radius: 8px; background: #007bff; color: white; margin-top: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); pointer-events: auto; }
+        button:active { transform: translateY(2px); box-shadow: none; background: #0056b3; }
 
-<style>
-body{
-  margin:0;
-  background:#eee;
-  font-family:sans-serif;
-  text-align:center;
-}
-
-/* スタート画面 */
-#startScreen{
-  position:fixed;
-  inset:0;
-  background:#222;
-  color:white;
-  display:flex;
-  flex-direction:column;
-  justify-content:center;
-  align-items:center;
-  z-index:10;
-}
-
-#startScreen button{
-  font-size:28px;
-  padding:15px 30px;
-  margin-top:20px;
-}
-
-/* ゲームボード */
-#board{
-  border:4px solid black;
-  display:flex;
-  justify-content:center;
-  align-items:center;
-  background:#ddd;
-  padding:10px;
-  flex-wrap:wrap;
-  gap:10px;
-  max-width:100%;
-  box-sizing:border-box;
-}
-
-.cardRow{
-  display:flex;
-  flex-wrap:wrap;
-  justify-content:center;
-  gap:10px;
-  width:100%;
-}
-
-#result{
-  font-size:26px;
-  height:40px;
-}
-
-#restartArea{
-  margin-top:10px;
-}
-
-/* スコア・操作ボタン */
-.container{
-  display:flex;
-  flex-wrap:wrap;
-  justify-content:space-around;
-  padding:10px;
-}
-
-.player{
-  flex:1 1 45%;
-  margin-bottom:10px;
-}
-
-.items{
-  display:flex;
-  flex-wrap:wrap;
-  justify-content:center;
-  gap:5px;
-}
-
-button{
-  padding:6px;
-  display:flex;
-  flex-direction:column;
-  align-items:center;
-}
-
-.score{
-  font-size:28px;
-}
-
-.key{
-  font-size:14px;
-}
-
-.win{
-  font-size:40px;
-  color:red;
-}
-
-/* 画像サイズを画面幅に応じて調整 */
-img{
-  width:15vw;      /* 画面幅の15% */
-  max-width:70px;  /* 最大70px */
-  height:auto;
-  object-fit:contain;
-}
-</style>
+        #controls { display: flex; width: 100%; max-width: 400px; height: 20vh; min-height: 80px; background: #222; }
+        .btn { flex: 1; border: 1px solid #444; font-size: 40px; display: flex; justify-content: center; align-items: center; color: white; background: #444; cursor: pointer; user-select: none; touch-action: none; }
+        .btn:active { background: #666; }
+    </style>
 </head>
 <body>
 
-<div id="startScreen">
-  <h1>対戦ゲーム</h1>
-  <p>10点先取で勝利！</p>
-  <button onclick="startGame()">START</button>
+<div id="gameWrapper">
+    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    
+    <div id="startScreen" class="screen">
+        <h1>Apple-Loving Squirrel</h1>
+        <p>
+            <span style="font-size: 1.5em;">🍎</span> キャッチで 1ポイント<br>
+            <span style="font-size: 1.5em;">💣</span> 当たると ゲームオーバー<br>
+            <span style="font-size: 1.5em;">⭐</span> 取ると 4.5秒間 無敵！<br>
+            <span style="color: #ffcccc; font-size: 0.9em;">※🍎を落とすと -1ポイント</span>
+        </p>
+        <p style="font-size: 14px; color: #ccc;">【操作】<br>左右ボタン(キー)を押している間だけ移動<br>離すと真ん中に戻ります</p>
+        <button id="startBtn">スタート</button>
+    </div>
+
+    <div id="gameOverScreen" class="screen hidden">
+        <h2>ゲームオーバー</h2>
+        <p>スコア: <span id="finalScore">0</span></p>
+        <button id="retryBtn">もう一回</button>
+    </div>
 </div>
 
-<div id="board">
-  <div class="cardRow" id="cardArea"></div>
-</div>
-
-<div id="result"></div>
-<div id="restartArea"></div>
-
-<div class="container">
-  <div class="player">
-    <div class="score" id="score1">1P (0)</div>
-    <div class="items" id="p1"></div>
-  </div>
-  <div class="player">
-    <div class="score" id="score2">2P (0)</div>
-    <div class="items" id="p2"></div>
-  </div>
+<div id="controls">
+    <div id="leftBtn" class="btn">←</div>
+    <div id="rightBtn" class="btn">→</div>
 </div>
 
 <script>
-const items = [
-  {name:"apple", color:"red"},
-  {name:"dog", color:"brown"},
-  {name:"cat", color:"yellow"},
-  {name:"hat", color:"black"},
-  {name:"car", color:"blue"}
-];
+    const GOOD_MARK = '🍎';
+    const BAD_MARK = '💣';
+    const STAR_MARK = '⭐';
 
-const keys1=["q","w","e","r","t"];
-const keys2=["y","u","i","o","p"];
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const finalScoreText = document.getElementById('finalScore');
+    const startBtn = document.getElementById('startBtn');
+    const retryBtn = document.getElementById('retryBtn');
 
-let score1=0, score2=0;
-let correctItem=null;
-let gameActive=false;
+    // 画像の読み込み
+    const playerImg = new Image();
+    playerImg.src = 'リス.png';
 
-/* 効果音 */
-const correctSound = new Audio("https://actions.google.com/sounds/v1/cartoon/wood_plank_flicks.ogg");
-const wrongSound   = new Audio("https://actions.google.com/sounds/v1/cartoon/cartoon_boing.ogg");
+    // --- 【追加】音声ファイルの読み込み ---
+    // ※同じフォルダに以下の名前の音声ファイルを入れてください
+    const bgm = new Audio('bgm.mp3');
+    bgm.loop = true; // BGMはループ再生
+    bgm.volume = 0.5; // BGMの音量（0.0 〜 1.0）
 
-/* ===== スタート ===== */
-function startGame(){
-  document.getElementById("startScreen").style.display="none";
-  restartGame();
-}
+    const seApple = new Audio('apple.mp3');
+    const seBomb = new Audio('bomb.mp3');
+    const seStar = new Audio('star.mp3');
 
-/* ===== リスタート ===== */
-function restartGame(){
-  score1=0;
-  score2=0;
-  correctItem=null;
-  gameActive=true;
+    // 効果音を連続で鳴らすための関数
+    function playSE(audioObj) {
+        audioObj.currentTime = 0; // 再生位置を最初に戻す（連続で取った時用）
+        audioObj.play().catch(e => console.log("音声再生エラー:", e));
+    }
 
-  document.getElementById("result").innerText="";
-  document.getElementById("restartArea").innerHTML="";
+    let gameState = 'START'; 
+    let score = 0;
+    let frameCount = 0;
+    let animationId;
+    let invincibleUntil = 0;
 
-  updateScore();
-  generateCard();
-}
+    const TOTAL_LANES = 3;
+    let LANE_WIDTH = canvas.width / TOTAL_LANES;
 
-/* ===== スコア更新 ===== */
-function updateScore(){
-  document.getElementById("score1").innerText=`1P (${score1})`;
-  document.getElementById("score2").innerText=`2P (${score2})`;
+    const player = {
+        lane: 1, width: 60, height: 60, color: '#007bff'
+    };
+    let items = [];
 
-  if(score1>=10) endGame("1P WIN!!");
-  if(score2>=10) endGame("2P WIN!!");
-}
+    let isLeftPressed = false;
+    let isRightPressed = false;
 
-/* ===== 終了処理 ===== */
-function endGame(message){
-  gameActive=false;
+    function updatePlayerLane() {
+        if (isLeftPressed && !isRightPressed) {
+            player.lane = 0;
+        } else if (isRightPressed && !isLeftPressed) {
+            player.lane = 2;
+        } else {
+            player.lane = 1;
+        }
+    }
 
-  document.getElementById("result").innerHTML=
-    `<div class='win'>${message}</div>`;
-
-  document.getElementById("restartArea").innerHTML=
-    `<button onclick="restartGame()" style="font-size:22px;">もう一回</button>`;
-}
-
-/* ===== 画像生成 ===== */
-function makeImage(type,color){
-  const div=document.createElement("div");
-  const img=document.createElement("img");
-  img.src=`images/${type}_${color}.jpg`;
-  div.appendChild(img);
-  return div;
-}
-
-/* ===== カード生成 ===== */
-function generateCard(){
-  if(!gameActive) return;
-
-  document.getElementById("result").innerText="";
-  const area=document.getElementById("cardArea");
-  area.innerHTML="";
-
-  while(true){
-    const shuffled=[...items].sort(()=>Math.random()-0.5);
-    const pair=[ {...shuffled[0]}, {...shuffled[1]} ];
-
-    pair.forEach(p=>{
-      p.displayColor = ["red","blue","yellow","brown","black"]
-        [Math.floor(Math.random()*5)];
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') isLeftPressed = true;
+        if (e.key === 'ArrowRight') isRightPressed = true;
+        updatePlayerLane();
+    });
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowLeft') isLeftPressed = false;
+        if (e.key === 'ArrowRight') isRightPressed = false;
+        updatePlayerLane();
     });
 
-    const usedNames=pair.map(p=>p.name);
-    const usedColors=pair.map(p=>p.displayColor);
+    const setupButton = (id, isLeft) => {
+        const btn = document.getElementById(id);
+        const press = (e) => {
+            e.preventDefault();
+            if (isLeft) isLeftPressed = true; else isRightPressed = true;
+            updatePlayerLane();
+        };
+        const release = (e) => {
+            e.preventDefault();
+            if (isLeft) isLeftPressed = false; else isRightPressed = false;
+            updatePlayerLane();
+        };
 
-    const matches=items.filter(i =>
-      pair.some(p=>p.name===i.name && p.displayColor===i.color)
-    );
+        btn.addEventListener('touchstart', press, { passive: false });
+        btn.addEventListener('mousedown', press);
+        btn.addEventListener('touchend', release, { passive: false });
+        btn.addEventListener('mouseup', release);
+        btn.addEventListener('mouseleave', release);
+    };
 
-    if(matches.length===1){
-      correctItem=matches[0];
-    }else if(matches.length===0){
-      const candidates=items.filter(i =>
-        !usedNames.includes(i.name) &&
-        !usedColors.includes(i.color)
-      );
-      if(candidates.length===1){
-        correctItem=candidates[0];
-      }else continue;
-    }else continue;
+    setupButton('leftBtn', true);
+    setupButton('rightBtn', false);
 
-    pair.forEach(p=>{
-      area.appendChild(makeImage(p.name,p.displayColor));
-    });
-
-    break;
-  }
-}
-
-/* ===== 判定 ===== */
-function handlePress(player,item){
-  if(!gameActive) return;
-
-  if(item.name===correctItem.name){
-    correctSound.play();
-    if(player===1) score1++;
-    else score2++;
-  }else{
-    wrongSound.play();
-    if(player===1) score2++;
-    else score1++;
-  }
-
-  updateScore();
-  if(gameActive) generateCard();
-}
-
-/* ===== ボタン生成 ===== */
-function setupButtons(){
-  const p1=document.getElementById("p1");
-  const p2=document.getElementById("p2");
-
-  items.forEach((item,i)=>{
-
-    const b1=document.createElement("button");
-    b1.appendChild(makeImage(item.name,item.color));
-    b1.innerHTML+=`<div class="key">${keys1[i].toUpperCase()}</div>`;
-    b1.onclick=()=>handlePress(1,item);
-    p1.appendChild(b1);
-
-    const b2=document.createElement("button");
-    b2.appendChild(makeImage(item.name,item.color));
-    b2.innerHTML+=`<div class="key">${keys2[i].toUpperCase()}</div>`;
-    b2.onclick=()=>handlePress(2,item);
-    p2.appendChild(b2);
-  });
-
-  document.addEventListener("keydown",e=>{
-    const k=e.key.toLowerCase();
-    if(keys1.includes(k)){
-      handlePress(1,items[keys1.indexOf(k)]);
+    function initGame() {
+        score = 0;
+        frameCount = 0;
+        items = [];
+        invincibleUntil = 0;
+        isLeftPressed = false;
+        isRightPressed = false;
+        updatePlayerLane();
+        
+        startScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        gameState = 'PLAYING';
+        
+        // --- 【追加】BGMの再生開始 ---
+        bgm.currentTime = 0;
+        bgm.play().catch(e => console.log("BGM再生エラー:", e));
+        
+        if (animationId) cancelAnimationFrame(animationId);
+        gameLoop();
     }
-    if(keys2.includes(k)){
-      handlePress(2,items[keys2.indexOf(k)]);
-    }
-  });
-}
 
-setupButtons();
+    function gameOver() {
+        gameState = 'GAMEOVER';
+        cancelAnimationFrame(animationId);
+        finalScoreText.textContent = score;
+        gameOverScreen.classList.remove('hidden');
+        
+        // --- 【追加】BGMを止める ---
+        bgm.pause();
+    }
+
+    function spawnItem() {
+        let difficultyScore = Math.max(0, score);
+        let spawnRate = Math.max(12, 30 - Math.floor(difficultyScore * 0.5)); 
+        
+        if (frameCount % spawnRate === 0) {
+            let targetLane = Math.floor(Math.random() * TOTAL_LANES);
+            let rand = Math.random();
+            let type, mark;
+            
+            let isInvincible = Date.now() < invincibleUntil;
+            
+            let starChance = 0.05;
+            if (difficultyScore > 20) starChance = 0.03;
+            if (difficultyScore > 40) starChance = 0.01;
+            if (isInvincible) starChance = 0; 
+
+            if (rand < starChance) {
+                type = 'STAR';
+                mark = STAR_MARK;
+            } else if (rand < 0.7) {
+                type = 'GOOD';
+                mark = GOOD_MARK;
+            } else {
+                type = 'BAD';
+                mark = BAD_MARK;
+            }
+            
+            items.push({
+                lane: targetLane,
+                y: -50,
+                size: 50, 
+                type: type,
+                mark: mark,
+                speed: 5 + Math.random() * 3 + (difficultyScore * 0.15) 
+            });
+        }
+    }
+
+    function update() {
+        let playerY = canvas.height - player.height - 20;
+        let isInvincible = Date.now() < invincibleUntil;
+
+        for (let i = items.length - 1; i >= 0; i--) {
+            let item = items[i];
+            item.y += item.speed;
+
+            if (item.lane === player.lane && 
+                item.y + item.size > playerY && 
+                item.y < playerY + player.height) {
+                
+                if (item.type === 'STAR') {
+                    // --- 【追加】スター取得音 ---
+                    playSE(seStar);
+                    invincibleUntil = Date.now() + 4500;
+                    items.splice(i, 1);
+                } else if (item.type === 'GOOD') {
+                    // --- 【追加】リンゴかじる音 ---
+                    playSE(seApple);
+                    score++; 
+                    items.splice(i, 1);
+                } else if (item.type === 'BAD') {
+                    if (isInvincible) {
+                        // 無敵中に爆弾を壊した時にもポン！と鳴らすと気持ちいいです
+                        playSE(seBomb);
+                        items.splice(i, 1);
+                    } else {
+                        // --- 【追加】ゲームオーバー爆発音 ---
+                        playSE(seBomb);
+                        gameOver(); 
+                        return;
+                    }
+                }
+            } 
+            else if (item.y > canvas.height) {
+                if (item.type === 'GOOD') {
+                    score--;
+                }
+                items.splice(i, 1);
+            }
+        }
+    }
+
+    function draw() {
+        ctx.fillStyle = '#f8f9fa';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        let playerY = canvas.height - player.height - 20;
+        let playerX = (player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2);
+        
+        let isInvincible = Date.now() < invincibleUntil;
+        let timeRemaining = invincibleUntil - Date.now();
+        let shouldDrawPlayer = true;
+
+        if (isInvincible) {
+            if (timeRemaining <= 1000) {
+                if (Math.floor(Date.now() / 100) % 2 === 0) {
+                    shouldDrawPlayer = false; 
+                }
+            }
+        }
+
+        if (shouldDrawPlayer) {
+            if (playerImg.complete && playerImg.naturalWidth > 0) {
+                if (isInvincible) {
+                    ctx.shadowBlur = 25; 
+                    ctx.shadowColor = `hsl(${(frameCount * 15) % 360}, 100%, 50%)`;
+                }
+                
+                ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
+                ctx.shadowBlur = 0; 
+            } else {
+                ctx.fillStyle = player.color;
+                ctx.fillRect(playerX, playerY, player.width, player.height);
+            }
+        }
+
+        ctx.font = '50px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (let item of items) {
+            let itemX = (item.lane * LANE_WIDTH) + (LANE_WIDTH / 2);
+            ctx.fillText(item.mark, itemX, item.y);
+        }
+
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`スコア: ${score}`, 15, 20);
+    }
+
+    function gameLoop() {
+        if (gameState !== 'PLAYING') return;
+        frameCount++;
+        
+        spawnItem();
+        update();
+        draw();
+
+        animationId = requestAnimationFrame(gameLoop);
+    }
+
+    startBtn.onclick = initGame;
+    retryBtn.onclick = initGame;
+
+    playerImg.onload = () => { draw(); };
+    draw();
 </script>
 </body>
 </html>
