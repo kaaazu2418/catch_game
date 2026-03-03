@@ -7,7 +7,6 @@
     <style>
         body { margin: 0; padding: 0; background-color: #333; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; touch-action: none; overflow: hidden; }
         #gameWrapper { width: 100%; max-width: 400px; position: relative; background-color: #f8f9fa; height: 80vh; max-height: 600px; }
-        /* CSS上のサイズ指定はそのまま（高画質化は内部で行うため） */
         canvas { display: block; width: 100%; height: 100%; }
         
         .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.85); color: white; text-align: center; z-index: 100; }
@@ -53,21 +52,34 @@
 </div>
 
 <script>
-    const GOOD_MARK = '🍎';
-    const BAD_MARK = '💣';
-    const STAR_MARK = '⭐';
+    // --- 【ラグ改善その1】絵文字を「画像」として事前レンダリング ---
+    function createEmojiCache(emoji, size) {
+        const c = document.createElement('canvas');
+        c.width = size * 1.5;
+        c.height = size * 1.5;
+        const tmpCtx = c.getContext('2d');
+        tmpCtx.font = `${size}px sans-serif`;
+        tmpCtx.textAlign = 'center';
+        tmpCtx.textBaseline = 'top';
+        tmpCtx.fillText(emoji, c.width / 2, 0);
+        return c;
+    }
+
+    const EMOJI_SIZE = 50;
+    const cacheApple = createEmojiCache('🍎', EMOJI_SIZE);
+    const cacheBomb = createEmojiCache('💣', EMOJI_SIZE);
+    const cacheStar = createEmojiCache('⭐', EMOJI_SIZE);
 
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     
-    // --- 【画質改善】スマホの高解像度ディスプレイ（Retina等）に対応 ---
+    // --- 【ラグ改善その2】スマホの解像度上限を2に制限して負荷を下げる ---
     const GAME_WIDTH = 400;
     const GAME_HEIGHT = 600;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2); 
     canvas.width = GAME_WIDTH * dpr;
     canvas.height = GAME_HEIGHT * dpr;
     ctx.scale(dpr, dpr);
-    // ----------------------------------------------------------------
 
     const startScreen = document.getElementById('startScreen');
     const gameOverScreen = document.getElementById('gameOverScreen');
@@ -187,7 +199,7 @@
         if (frameCount % spawnRate === 0) {
             let targetLane = Math.floor(Math.random() * TOTAL_LANES);
             let rand = Math.random();
-            let type, mark;
+            let type;
             
             let isInvincible = Date.now() < invincibleUntil;
             
@@ -198,21 +210,17 @@
 
             if (rand < starChance) {
                 type = 'STAR';
-                mark = STAR_MARK;
             } else if (rand < 0.7) {
                 type = 'GOOD';
-                mark = GOOD_MARK;
             } else {
                 type = 'BAD';
-                mark = BAD_MARK;
             }
             
             items.push({
                 lane: targetLane,
                 y: -50,
-                size: 50, 
+                size: EMOJI_SIZE, 
                 type: type,
-                mark: mark,
                 speed: 5 + Math.random() * 3 + (difficultyScore * 0.15) 
             });
         }
@@ -262,8 +270,9 @@
         ctx.fillStyle = '#f8f9fa';
         ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-        let playerY = GAME_HEIGHT - player.height - 20;
-        let playerX = (player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2);
+        // --- 【ラグ改善その3】描画位置をMath.floorで整数に丸める ---
+        let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
+        let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
         
         let isInvincible = Date.now() < invincibleUntil;
         let timeRemaining = invincibleUntil - Date.now();
@@ -278,7 +287,6 @@
         }
 
         if (shouldDrawPlayer) {
-            // --- 【ラグ改善】重い shadowBlur をやめて、背後に半透明のオーラを描く ---
             if (isInvincible) {
                 ctx.fillStyle = `hsla(${(frameCount * 15) % 360}, 100%, 50%, 0.6)`;
                 ctx.beginPath();
@@ -294,12 +302,18 @@
             }
         }
 
-        ctx.font = '50px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
+        // アイテムの描画（事前レンダリングした画像を呼び出す）
         for (let item of items) {
-            let itemX = (item.lane * LANE_WIDTH) + (LANE_WIDTH / 2);
-            ctx.fillText(item.mark, itemX, item.y);
+            let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
+            let itemY = Math.floor(item.y);
+            let imgCache;
+            
+            if (item.type === 'STAR') imgCache = cacheStar;
+            else if (item.type === 'GOOD') imgCache = cacheApple;
+            else imgCache = cacheBomb;
+
+            // キャッシュ画像の中心と合わせるように描画
+            ctx.drawImage(imgCache, Math.floor(itemX - imgCache.width / 2), itemY);
         }
 
         ctx.fillStyle = '#333';
