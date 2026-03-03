@@ -123,11 +123,14 @@ function playSE(audioData) {
     if (!audioData || audioData.pool.length === 0) return;
     const audio = audioData.pool[audioData.index];
     
-    // 再生可能な状態かチェック（スマホでのエラー回避）
-    if(audio.readyState >= 2) {
+    // 厳しすぎた読み込みチェックを外し、代わりにtry-catchで安全に頭出しを行う
+    try {
         audio.currentTime = 0;
-        audio.play().catch(e => console.log("SE再生エラー:", e));
+    } catch (e) {
+        // まだデータが読み込まれておらずエラーになる場合は無視して進める
     }
+    
+    audio.play().catch(e => console.log("SE再生エラー:", e));
     
     audioData.index = (audioData.index + 1) % audioData.pool.length;
 }
