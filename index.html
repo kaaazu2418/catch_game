@@ -57,279 +57,335 @@
 </div>
 
 <script>
-    const GOOD_MARK = '🍎';
-    const BAD_MARK = '💣';
-    const STAR_MARK = '⭐';
+const GOOD_MARK = '🍎';
+const BAD_MARK = '💣';
+const STAR_MARK = '⭐';
 
-    const canvas = document.getElementById('gameCanvas');
-    const ctx = canvas.getContext('2d');
-    
-    const bgCanvas = document.getElementById('bgCanvas');
-    const bgCtx = bgCanvas.getContext('2d');
-    
-    const GAME_WIDTH = 400;
-    const GAME_HEIGHT = 600;
-    // 【変更】dprの上限を少し上げる（2.0へ）ことで画質の改善を試みる
-    const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
-    
-    canvas.width = GAME_WIDTH * dpr;
-    canvas.height = GAME_HEIGHT * dpr;
-    ctx.scale(dpr, dpr);
-    
-    bgCanvas.width = GAME_WIDTH * dpr;
-    bgCanvas.height = GAME_HEIGHT * dpr;
-    bgCtx.scale(dpr, dpr);
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
 
-    const startScreen = document.getElementById('startScreen');
-    const gameOverScreen = document.getElementById('gameOverScreen');
-    const finalScoreText = document.getElementById('finalScore');
-    const startBtn = document.getElementById('startBtn');
-    const retryBtn = document.getElementById('retryBtn');
+const bgCanvas = document.getElementById('bgCanvas');
+const bgCtx = bgCanvas.getContext('2d');
 
-    let gameState = 'START'; 
-    let score = 0;
-    let animationId;
-    let invincibleUntil = 0;
-    
-    let lastTime = 0;
-    let itemSpawnTimer = 0;
-    let effectFrame = 0;
+const GAME_WIDTH = 400;
+const GAME_HEIGHT = 600;
+const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
 
-    const TOTAL_LANES = 3;
-    let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
+canvas.width = GAME_WIDTH * dpr;
+canvas.height = GAME_HEIGHT * dpr;
+ctx.scale(dpr, dpr);
 
-    const player = { lane: 1, width: 60, height: 60 };
-    let items = [];
-    let isLeftPressed = false;
-    let isRightPressed = false;
+bgCanvas.width = GAME_WIDTH * dpr;
+bgCanvas.height = GAME_HEIGHT * dpr;
+bgCtx.scale(dpr, dpr);
 
-    // 【追加】BGMと効果音のロードをページロード時に行うように修正
-    const bgm = new Audio('bgm.mp3'); bgm.loop = true; bgm.volume = 0.5;
-    // 効果音再生用のAudioオブジェクトを配列で管理し、プーリングを行う
-    const seAppleList = [];
-    const seBombList = [];
-    const seStarList = [];
-    for (let i = 0; i < 10; i++) { // 各効果音を10個ずつ作成
-        seAppleList.push(new Audio('apple.mp3'));
-        seBombList.push(new Audio('bomb.mp3'));
-        seStarList.push(new Audio('star.mp3'));
+const startScreen = document.getElementById('startScreen');
+const gameOverScreen = document.getElementById('gameOverScreen');
+const finalScoreText = document.getElementById('finalScore');
+const startBtn = document.getElementById('startBtn');
+const retryBtn = document.getElementById('retryBtn');
+
+let gameState = 'START';
+let score = 0;
+let animationId;
+let invincibleUntil = 0;
+
+let lastTime = 0;
+let itemSpawnTimer = 0;
+let effectFrame = 0;
+
+const TOTAL_LANES = 3;
+let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
+
+const player = { lane: 1, width: 60, height: 60 };
+let isLeftPressed = false;
+let isRightPressed = false;
+
+// --- 音声関連 ---
+const bgm = new Audio('bgm.mp3'); bgm.loop = true; bgm.volume = 0.5;
+
+function createAudioPool(src, size) {
+    const pool = [];
+    for (let i = 0; i < size; i++) {
+        const audio = new Audio(src);
+        audio.preload = 'auto'; // 事前読み込みを推奨
+        pool.push(audio);
     }
-    let appleSeIndex = 0;
-    let bombSeIndex = 0;
-    let starSeIndex = 0;
+    return { pool, index: 0 };
+}
 
-    function playSE(audioList, index) {
-        if(!audioList || audioList.length === 0) return;
-        audioList[index].play().catch(e => console.log("音声再生エラー:", e));
-        index = (index + 1) % audioList.length; // 次のAudioオブジェクトを再生
-        return index;
+// SEの数を少し減らしてメモリ負荷を下げる
+const seApple = createAudioPool('apple.mp3', 5);
+const seBomb = createAudioPool('bomb.mp3', 3);
+const seStar = createAudioPool('star.mp3', 2);
+
+function playSE(audioData) {
+    if (!audioData || audioData.pool.length === 0) return;
+    const audio = audioData.pool[audioData.index];
+    
+    // 再生可能な状態かチェック（スマホでのエラー回避）
+    if(audio.readyState >= 2) {
+        audio.currentTime = 0;
+        audio.play().catch(e => console.log("SE再生エラー:", e));
     }
+    
+    audioData.index = (audioData.index + 1) % audioData.pool.length;
+}
 
-    const playerImg = new Image();
-    playerImg.src = 'リス.png';
-    playerImg.onload = () => { draw(); };
-
-    const bgImg = new Image();
-    bgImg.src = 'back.jpg'; // 背景画像を指定
-    bgImg.onload = () => {
-        bgCtx.drawImage(bgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
-    };
-    bgImg.onerror = () => { // 読み込み失敗時のエラーハンドリングを追加
-        console.log("背景画像(back.jpg)が見つかりません。デフォルトの背景を使用します。");
-        bgCtx.fillStyle = '#f8f9fa';
-        bgCtx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    };
-
-    function updatePlayerLane() {
-        if (isLeftPressed && !isRightPressed) player.lane = 0;
-        else if (isRightPressed && !isLeftPressed) player.lane = 2;
-        else player.lane = 1;
-    }
-
-    document.addEventListener('keydown', (e) => {
-        if (e.key === 'ArrowLeft') isLeftPressed = true;
-        if (e.key === 'ArrowRight') isRightPressed = true;
-        updatePlayerLane();
+// --- オブジェクトプーリング（アイテム） ---
+const MAX_ITEMS = 20; // 画面に出る最大アイテム数を定義
+const itemPool = [];
+for (let i = 0; i < MAX_ITEMS; i++) {
+    itemPool.push({
+        active: false, // 画面に出ているかどうか
+        lane: 0,
+        y: 0,
+        size: 50,
+        type: 'GOOD',
+        mark: GOOD_MARK,
+        speed: 0
     });
-    document.addEventListener('keyup', (e) => {
-        if (e.key === 'ArrowLeft') isLeftPressed = false;
-        if (e.key === 'ArrowRight') isRightPressed = false;
-        updatePlayerLane();
-    });
+}
 
-    const setupButton = (id, isLeft) => {
-        const btn = document.getElementById(id);
-        const press = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = true; else isRightPressed = true; updatePlayerLane(); };
-        const release = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = false; else isRightPressed = false; updatePlayerLane(); };
+function getFreeItem() {
+    for (let i = 0; i < itemPool.length; i++) {
+        if (!itemPool[i].active) return itemPool[i];
+    }
+    return null; // 全て使用中（通常は発生しないようにMAX_ITEMSを調整）
+}
 
-        btn.addEventListener('touchstart', press, { passive: false });
-        btn.addEventListener('mousedown', press);
-        btn.addEventListener('touchend', release, { passive: false });
-        btn.addEventListener('mouseup', release);
-        btn.addEventListener('mouseleave', release);
-    };
+// --- 画像関連 ---
+const playerImg = new Image();
+playerImg.src = 'リス.png';
+playerImg.onload = () => { draw(); };
 
-    setupButton('leftBtn', true);
-    setupButton('rightBtn', false);
+const bgImg = new Image();
+bgImg.src = 'back.jpg';
+bgImg.onload = () => {
+    bgCtx.drawImage(bgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+};
+bgImg.onerror = () => {
+    bgCtx.fillStyle = '#f8f9fa';
+    bgCtx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+};
 
-    function initGame() {
-        score = 0; 
-        items = []; 
-        invincibleUntil = 0;
-        lastTime = performance.now();
+// --- 操作関連 ---
+function updatePlayerLane() {
+    if (isLeftPressed && !isRightPressed) player.lane = 0;
+    else if (isRightPressed && !isLeftPressed) player.lane = 2;
+    else player.lane = 1;
+}
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') isLeftPressed = true;
+    if (e.key === 'ArrowRight') isRightPressed = true;
+    updatePlayerLane();
+});
+document.addEventListener('keyup', (e) => {
+    if (e.key === 'ArrowLeft') isLeftPressed = false;
+    if (e.key === 'ArrowRight') isRightPressed = false;
+    updatePlayerLane();
+});
+
+const setupButton = (id, isLeft) => {
+    const btn = document.getElementById(id);
+    const press = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = true; else isRightPressed = true; updatePlayerLane(); };
+    const release = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = false; else isRightPressed = false; updatePlayerLane(); };
+
+    btn.addEventListener('touchstart', press, { passive: false });
+    btn.addEventListener('mousedown', press);
+    btn.addEventListener('touchend', release, { passive: false });
+    btn.addEventListener('mouseup', release);
+    btn.addEventListener('mouseleave', release);
+};
+
+setupButton('leftBtn', true);
+setupButton('rightBtn', false);
+
+// --- ゲームロジック ---
+function initGame() {
+    score = 0;
+    invincibleUntil = 0;
+    lastTime = performance.now();
+    itemSpawnTimer = 0;
+    effectFrame = 0;
+    
+    // アイテムプールをリセット
+    itemPool.forEach(item => item.active = false);
+
+    isLeftPressed = false;
+    isRightPressed = false;
+    updatePlayerLane();
+    
+    startScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    gameState = 'PLAYING';
+    
+    // スマホでのBGM再生開始エラー対策
+    bgm.play().catch(e => console.log("BGM再生エラー:", e));
+    
+    if (animationId) cancelAnimationFrame(animationId);
+    animationId = requestAnimationFrame(gameLoop);
+}
+
+function gameOver() {
+    gameState = 'GAMEOVER';
+    cancelAnimationFrame(animationId);
+    finalScoreText.textContent = score;
+    gameOverScreen.classList.remove('hidden');
+    bgm.pause();
+}
+
+function spawnItem(deltaTime) {
+    let difficultyScore = Math.max(0, score);
+    let spawnIntervalMs = Math.max(200, 500 - (difficultyScore * 8));
+    
+    itemSpawnTimer += deltaTime;
+    
+    if (itemSpawnTimer > spawnIntervalMs) {
         itemSpawnTimer = 0;
-        effectFrame = 0;
         
-        isLeftPressed = false; 
-        isRightPressed = false; 
-        updatePlayerLane();
-        
-        startScreen.classList.add('hidden'); 
-        gameOverScreen.classList.add('hidden');
-        gameState = 'PLAYING';
-        bgm.currentTime = 0; 
-        bgm.play().catch(e => console.log("BGM再生エラー:", e));
-        
-        if (animationId) cancelAnimationFrame(animationId);
-        animationId = requestAnimationFrame(gameLoop);
-    }
+        const newItem = getFreeItem();
+        if (!newItem) return; // プールが空なら生成スキップ
 
-    function gameOver() {
-        gameState = 'GAMEOVER';
-        cancelAnimationFrame(animationId);
-        finalScoreText.textContent = score;
-        gameOverScreen.classList.remove('hidden');
-        bgm.pause();
-    }
-
-    function spawnItem(deltaTime) {
-        let difficultyScore = Math.max(0, score);
-        let spawnIntervalMs = Math.max(200, 500 - (difficultyScore * 8)); 
-        
-        itemSpawnTimer += deltaTime;
-        
-        if (itemSpawnTimer > spawnIntervalMs) {
-            itemSpawnTimer = 0; 
-            
-            let targetLane = Math.floor(Math.random() * TOTAL_LANES);
-            let rand = Math.random();
-            let type, mark;
-            let isInvincible = Date.now() < invincibleUntil;
-            let starChance = 0.05;
-            if (difficultyScore > 20) starChance = 0.03;
-            if (difficultyScore > 40) starChance = 0.01;
-            if (isInvincible) starChance = 0; 
-
-            if (rand < starChance) { type = 'STAR'; mark = STAR_MARK; }
-            else if (rand < 0.7)   { type = 'GOOD'; mark = GOOD_MARK; }
-            else                   { type = 'BAD';  mark = BAD_MARK; }
-            
-            let baseSpeed = 300 + (Math.random() * 150) + (difficultyScore * 10);
-            
-            items.push({
-                lane: targetLane, 
-                y: -50, 
-                size: 50, 
-                type: type, 
-                mark: mark,
-                speed: baseSpeed 
-            });
-        }
-    }
-
-    function update(deltaTime) {
-        let playerY = GAME_HEIGHT - player.height - 20;
+        let targetLane = Math.floor(Math.random() * TOTAL_LANES);
+        let rand = Math.random();
+        let type, mark;
         let isInvincible = Date.now() < invincibleUntil;
+        
+        let starChance = 0.05;
+        if (difficultyScore > 20) starChance = 0.03;
+        if (difficultyScore > 40) starChance = 0.01;
+        if (isInvincible) starChance = 0;
 
-        for (let i = items.length - 1; i >= 0; i--) {
-            let item = items[i];
-            item.y += item.speed * (deltaTime / 1000);
+        if (rand < starChance) { type = 'STAR'; mark = STAR_MARK; }
+        else if (rand < 0.7)   { type = 'GOOD'; mark = GOOD_MARK; }
+        else                   { type = 'BAD';  mark = BAD_MARK; }
+        
+        let baseSpeed = 300 + (Math.random() * 150) + (difficultyScore * 10);
+        
+        // オブジェクトのプロパティを再設定して「生成」とする
+        newItem.active = true;
+        newItem.lane = targetLane;
+        newItem.y = -50;
+        newItem.type = type;
+        newItem.mark = mark;
+        newItem.speed = baseSpeed;
+    }
+}
 
-            if (item.lane === player.lane && item.y + item.size > playerY && item.y < playerY + player.height) {
-                if (item.type === 'STAR') {
-                    starSeIndex = playSE(seStarList, starSeIndex); invincibleUntil = Date.now() + 4500; items.splice(i, 1);
-                } else if (item.type === 'GOOD') {
-                    appleSeIndex = playSE(seAppleList, appleSeIndex); score++; items.splice(i, 1);
-                } else if (item.type === 'BAD') {
-                    if (isInvincible) { bombSeIndex = playSE(seBombList, bombSeIndex); items.splice(i, 1); } 
-                    else { bombSeIndex = playSE(seBombList, bombSeIndex); gameOver(); return; }
+function update(deltaTime) {
+    let playerY = GAME_HEIGHT - player.height - 20;
+    let isInvincible = Date.now() < invincibleUntil;
+
+    for (let i = 0; i < itemPool.length; i++) {
+        let item = itemPool[i];
+        if (!item.active) continue; // アクティブでないアイテムは無視
+
+        item.y += item.speed * (deltaTime / 1000);
+
+        // 当たり判定
+        if (item.lane === player.lane && item.y + item.size > playerY && item.y < playerY + player.height) {
+            if (item.type === 'STAR') {
+                playSE(seStar);
+                invincibleUntil = Date.now() + 4500;
+                item.active = false; // 削除の代わりに非アクティブ化
+            } else if (item.type === 'GOOD') {
+                playSE(seApple);
+                score++;
+                item.active = false;
+            } else if (item.type === 'BAD') {
+                if (isInvincible) {
+                    playSE(seBomb);
+                    item.active = false;
+                } else {
+                    playSE(seBomb);
+                    gameOver();
+                    return;
                 }
-            } 
-            else if (item.y > GAME_HEIGHT) {
-                if (item.type === 'GOOD') score--;
-                items.splice(i, 1);
             }
         }
-    }
-
-    function draw() {
-        ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-        let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
-        let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
-        
-        let isInvincible = Date.now() < invincibleUntil;
-        let timeRemaining = invincibleUntil - Date.now();
-        let shouldDrawPlayer = true;
-
-        if (isInvincible && timeRemaining <= 1000) {
-            if (Math.floor(Date.now() / 100) % 2 === 0) shouldDrawPlayer = false; 
+        // 画面外に出た判定
+        else if (item.y > GAME_HEIGHT) {
+            if (item.type === 'GOOD') score--;
+            item.active = false;
         }
-
-        if (shouldDrawPlayer) {
-            // --- 【変更】無敵モードのエフェクト：shadowBlurを復活させつつ負荷を調整 ---
-            if (isInvincible) {
-                effectFrame++; 
-                ctx.shadowBlur = 15; // 光の広がり（Blur）を25から15に少し下げて負荷を調整
-                ctx.shadowColor = `hsl(${(effectFrame * 5) % 360}, 100%, 50%)`;
-            }
-
-            if (playerImg.complete && playerImg.naturalWidth > 0) {
-                ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
-            } else {
-                ctx.fillStyle = '#007bff';
-                ctx.fillRect(playerX, playerY, player.width, player.height);
-            }
-
-            // 影をリセット
-            ctx.shadowBlur = 0;
-        }
-
-        ctx.font = '50px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        for (let item of items) {
-            let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
-            let itemY = Math.floor(item.y);
-            ctx.fillText(item.mark, itemX, itemY);
-        }
-
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.fillRect(5, 5, 120, 35);
-        ctx.fillStyle = '#333';
-        ctx.font = 'bold 24px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.fillText(`スコア: ${score}`, 15, 10);
     }
+}
 
-    function gameLoop(currentTime) {
-        if (gameState !== 'PLAYING') return;
-        
-        let deltaTime = currentTime - lastTime;
-        lastTime = currentTime;
-        
-        if (deltaTime > 100) deltaTime = 100;
-        
-        spawnItem(deltaTime); 
-        update(deltaTime); 
-        draw();
-        
-        animationId = requestAnimationFrame(gameLoop);
-    }
+function draw() {
+    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    startBtn.onclick = initGame;
-    retryBtn.onclick = initGame;
+    let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
+    let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
     
+    let isInvincible = Date.now() < invincibleUntil;
+    let timeRemaining = invincibleUntil - Date.now();
+    let shouldDrawPlayer = true;
+
+    if (isInvincible && timeRemaining <= 1000) {
+        if (Math.floor(Date.now() / 100) % 2 === 0) shouldDrawPlayer = false;
+    }
+
+    if (shouldDrawPlayer) {
+        // --- 虹色エフェクト ---
+        if (isInvincible) {
+            effectFrame += 2; // 色の変化スピード
+            ctx.shadowBlur = 20;
+            // HSLカラーを使って虹色に変化させる
+            ctx.shadowColor = `hsl(${effectFrame % 360}, 100%, 60%)`;
+        }
+
+        if (playerImg.complete && playerImg.naturalWidth > 0) {
+            ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
+        } else {
+            ctx.fillStyle = '#007bff';
+            ctx.fillRect(playerX, playerY, player.width, player.height);
+        }
+
+        ctx.shadowBlur = 0; // 影（エフェクト）をリセット
+    }
+
+    ctx.font = '50px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    
+    for (let i = 0; i < itemPool.length; i++) {
+        let item = itemPool[i];
+        if (!item.active) continue;
+        
+        let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
+        let itemY = Math.floor(item.y);
+        ctx.fillText(item.mark, itemX, itemY);
+    }
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.fillRect(5, 5, 120, 35);
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`スコア: ${score}`, 15, 10);
+}
+
+function gameLoop(currentTime) {
+    if (gameState !== 'PLAYING') return;
+    
+    let deltaTime = currentTime - lastTime;
+    lastTime = currentTime;
+    
+    // ラグスパイク（極端な遅延）対策
+    if (deltaTime > 100) deltaTime = 16;
+    
+    spawnItem(deltaTime);
+    update(deltaTime);
+    draw();
+    
+    animationId = requestAnimationFrame(gameLoop);
+}
+
+startBtn.onclick = initGame;
+retryBtn.onclick = initGame;
+
 </script>
 </body>
 </html>
