@@ -52,7 +52,6 @@
 </div>
 
 <script>
-    // --- 【ラグ改善その1】絵文字を「画像」として事前レンダリング ---
     function createEmojiCache(emoji, size) {
         const c = document.createElement('canvas');
         c.width = size * 1.5;
@@ -73,10 +72,10 @@
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     
-    // --- 【ラグ改善その2】スマホの解像度上限を2に制限して負荷を下げる ---
+    // --- 【変更】画質と軽さのバランスを調整（上限を1.5にしてラグを軽減） ---
     const GAME_WIDTH = 400;
     const GAME_HEIGHT = 600;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2); 
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5); 
     canvas.width = GAME_WIDTH * dpr;
     canvas.height = GAME_HEIGHT * dpr;
     ctx.scale(dpr, dpr);
@@ -270,7 +269,6 @@
         ctx.fillStyle = '#f8f9fa';
         ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-        // --- 【ラグ改善その3】描画位置をMath.floorで整数に丸める ---
         let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
         let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
         
@@ -287,22 +285,26 @@
         }
 
         if (shouldDrawPlayer) {
-            if (isInvincible) {
-                ctx.fillStyle = `hsla(${(frameCount * 15) % 360}, 100%, 50%, 0.6)`;
-                ctx.beginPath();
-                ctx.arc(playerX + player.width / 2, playerY + player.height / 2, player.width / 2 + 15, 0, Math.PI * 2);
-                ctx.fill();
-            }
-
             if (playerImg.complete && playerImg.naturalWidth > 0) {
+                
+                // --- 【変更】リスの形に光るエフェクトを復活！ ---
+                // ※ラグ軽減のため、光の広がり（Blur）を25から15に少しだけ下げています
+                if (isInvincible) {
+                    ctx.shadowBlur = 15; 
+                    ctx.shadowColor = `hsl(${(frameCount * 15) % 360}, 100%, 50%)`;
+                }
+                
                 ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
+                
+                // 影をリセット
+                ctx.shadowBlur = 0;
+
             } else {
                 ctx.fillStyle = player.color;
                 ctx.fillRect(playerX, playerY, player.width, player.height);
             }
         }
 
-        // アイテムの描画（事前レンダリングした画像を呼び出す）
         for (let item of items) {
             let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
             let itemY = Math.floor(item.y);
@@ -312,7 +314,6 @@
             else if (item.type === 'GOOD') imgCache = cacheApple;
             else imgCache = cacheBomb;
 
-            // キャッシュ画像の中心と合わせるように描画
             ctx.drawImage(imgCache, Math.floor(itemX - imgCache.width / 2), itemY);
         }
 
