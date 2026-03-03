@@ -52,26 +52,14 @@
 </div>
 
 <script>
-    function createEmojiCache(emoji, size) {
-        const c = document.createElement('canvas');
-        c.width = size * 1.5;
-        c.height = size * 1.5;
-        const tmpCtx = c.getContext('2d');
-        tmpCtx.font = `${size}px sans-serif`;
-        tmpCtx.textAlign = 'center';
-        tmpCtx.textBaseline = 'top';
-        tmpCtx.fillText(emoji, c.width / 2, 0);
-        return c;
-    }
-
-    const EMOJI_SIZE = 50;
-    const cacheApple = createEmojiCache('🍎', EMOJI_SIZE);
-    const cacheBomb = createEmojiCache('💣', EMOJI_SIZE);
-    const cacheStar = createEmojiCache('⭐', EMOJI_SIZE);
+    const GOOD_MARK = '🍎';
+    const BAD_MARK = '💣';
+    const STAR_MARK = '⭐';
 
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     
+    // 描画品質と速度のバランスを重視したDPR設定
     const GAME_WIDTH = 400;
     const GAME_HEIGHT = 600;
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5); 
@@ -90,6 +78,10 @@
     let frameCount = 0;
     let animationId;
     let invincibleUntil = 0;
+    
+    // 時間ベースアニメーション用の変数
+    let lastTime = 0;
+    let itemSpawnTimer = 0;
 
     const TOTAL_LANES = 3;
     let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
@@ -112,28 +104,7 @@
 
     const playerImg = new Image();
     playerImg.src = 'リス.png';
-    
-    // --- 【超軽量化の裏技】無敵リスのパラパラ漫画を作る ---
-    const rainbowSquirrels = []; 
-    playerImg.onload = () => {
-        // 色を10度ずつズラして、36枚の「光るリス」の画像を裏で作っておく
-        for (let i = 0; i < 360; i += 10) {
-            const c = document.createElement('canvas');
-            // 光がはみ出さないように枠を少し大きめ（100x100）にとる
-            c.width = 100;
-            c.height = 100;
-            const tCtx = c.getContext('2d');
-            
-            // この中だけで激重処理（shadowBlur）を1回だけやっておく
-            tCtx.shadowBlur = 15;
-            tCtx.shadowColor = `hsl(${i}, 100%, 50%)`;
-            tCtx.drawImage(playerImg, 20, 20, player.width, player.height); // 中心に描画
-            
-            // できあがった画像を配列に保存
-            rainbowSquirrels.push(c);
-        }
-        draw(); 
-    };
+    playerImg.onload = () => { draw(); };
 
     function updatePlayerLane() {
         if (isLeftPressed && !isRightPressed) player.lane = 0;
@@ -168,13 +139,25 @@
     setupButton('rightBtn', false);
 
     function initGame() {
-        score = 0; frameCount = 0; items = []; invincibleUntil = 0;
-        isLeftPressed = false; isRightPressed = false; updatePlayerLane();
-        startScreen.classList.add('hidden'); gameOverScreen.classList.add('hidden');
+        score = 0; 
+        frameCount = 0; 
+        items = []; 
+        invincibleUntil = 0;
+        lastTime = performance.now();
+        itemSpawnTimer = 0;
+        
+        isLeftPressed = false; 
+        isRightPressed = false; 
+        updatePlayerLane();
+        
+        startScreen.classList.add('hidden'); 
+        gameOverScreen.classList.add('hidden');
         gameState = 'PLAYING';
-        bgm.currentTime = 0; bgm.play().catch(e => console.log("BGM再生エラー:", e));
+        bgm.currentTime = 0; 
+        bgm.play().catch(e => console.log("BGM再生エラー:", e));
+        
         if (animationId) cancelAnimationFrame(animationId);
-        gameLoop();
+        animationId = requestAnimationFrame(gameLoop);
     }
 
     function gameOver() {
@@ -185,38 +168,54 @@
         bgm.pause();
     }
 
-    function spawnItem() {
+    // deltaTimeを受け取って処理を調整する
+    function spawnItem(deltaTime) {
         let difficultyScore = Math.max(0, score);
-        let spawnRate = Math.max(12, 30 - Math.floor(difficultyScore * 0.5)); 
         
-        if (frameCount % spawnRate === 0) {
+        // フレーム数ではなく、実時間(ミリ秒)で出現間隔を管理
+        let spawnIntervalMs = Math.max(200, 500 - (difficultyScore * 8)); 
+        
+        itemSpawnTimer += deltaTime;
+        
+        if (itemSpawnTimer > spawnIntervalMs) {
+            itemSpawnTimer = 0; // タイマーリセット
+            
             let targetLane = Math.floor(Math.random() * TOTAL_LANES);
             let rand = Math.random();
-            let type;
+            let type, mark;
             let isInvincible = Date.now() < invincibleUntil;
             let starChance = 0.05;
             if (difficultyScore > 20) starChance = 0.03;
             if (difficultyScore > 40) starChance = 0.01;
             if (isInvincible) starChance = 0; 
 
-            if (rand < starChance) type = 'STAR';
-            else if (rand < 0.7) type = 'GOOD';
-            else type = 'BAD';
+            if (rand < starChance) { type = 'STAR'; mark = STAR_MARK; }
+            else if (rand < 0.7)   { type = 'GOOD'; mark = GOOD_MARK; }
+            else                   { type = 'BAD';  mark = BAD_MARK; }
+            
+            // 速度の基準値（1秒間に移動するピクセル数ベース）
+            let baseSpeed = 300 + (Math.random() * 150) + (difficultyScore * 10);
             
             items.push({
-                lane: targetLane, y: -50, size: EMOJI_SIZE, type: type,
-                speed: 5 + Math.random() * 3 + (difficultyScore * 0.15) 
+                lane: targetLane, 
+                y: -50, 
+                size: 50, 
+                type: type, 
+                mark: mark,
+                speed: baseSpeed 
             });
         }
     }
 
-    function update() {
+    function update(deltaTime) {
         let playerY = GAME_HEIGHT - player.height - 20;
         let isInvincible = Date.now() < invincibleUntil;
 
         for (let i = items.length - 1; i >= 0; i--) {
             let item = items[i];
-            item.y += item.speed;
+            
+            // 時間に基づいて移動距離を計算 (1秒 = 1000ms)
+            item.y += item.speed * (deltaTime / 1000);
 
             if (item.lane === player.lane && item.y + item.size > playerY && item.y < playerY + player.height) {
                 if (item.type === 'STAR') {
@@ -251,13 +250,15 @@
         }
 
         if (shouldDrawPlayer) {
-            if (isInvincible && rainbowSquirrels.length === 36) {
-                // --- 【超軽量化の裏技】事前に作った36枚の画像から、いま必要な1枚を選んで貼るだけ ---
-                // frameCountから色を計算し、配列の0〜35番のどれかに割り当てる
-                let index = Math.floor(((frameCount * 15) % 360) / 10);
-                // 保存した画像は枠が20px大きいので、表示位置も20pxずらして調整する
-                ctx.drawImage(rainbowSquirrels[index], playerX - 20, playerY - 20);
-            } else if (playerImg.complete && playerImg.naturalWidth > 0) {
+            // 背景のオーラエフェクトをシンプルに（shadowBlurを使わない）
+            if (isInvincible) {
+                ctx.fillStyle = `hsla(${(frameCount * 15) % 360}, 100%, 50%, 0.6)`;
+                ctx.beginPath();
+                ctx.arc(playerX + player.width / 2, playerY + player.height / 2, player.width / 2 + 10, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            if (playerImg.complete && playerImg.naturalWidth > 0) {
                 ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
             } else {
                 ctx.fillStyle = player.color;
@@ -265,14 +266,14 @@
             }
         }
 
+        // アイテムの描画（シンプルに文字として描画）
+        ctx.font = '50px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
         for (let item of items) {
             let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
             let itemY = Math.floor(item.y);
-            let imgCache;
-            if (item.type === 'STAR') imgCache = cacheStar;
-            else if (item.type === 'GOOD') imgCache = cacheApple;
-            else imgCache = cacheBomb;
-            ctx.drawImage(imgCache, Math.floor(itemX - imgCache.width / 2), itemY);
+            ctx.fillText(item.mark, itemX, itemY);
         }
 
         ctx.fillStyle = '#333';
@@ -281,15 +282,30 @@
         ctx.fillText(`スコア: ${score}`, 15, 20);
     }
 
-    function gameLoop() {
+    function gameLoop(currentTime) {
         if (gameState !== 'PLAYING') return;
+        
+        // Delta Time (前回のフレームからの経過時間) の計算
+        let deltaTime = currentTime - lastTime;
+        lastTime = currentTime;
+        
+        // 異常に時間が経っていた場合（タブを裏に回していた等）の補正
+        if (deltaTime > 100) deltaTime = 100;
+
         frameCount++;
-        spawnItem(); update(); draw();
+        
+        spawnItem(deltaTime); 
+        update(deltaTime); 
+        draw();
+        
         animationId = requestAnimationFrame(gameLoop);
     }
 
     startBtn.onclick = initGame;
     retryBtn.onclick = initGame;
+    
+    // 初期描画
+    draw();
 </script>
 </body>
 </html>
