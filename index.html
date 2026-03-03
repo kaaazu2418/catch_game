@@ -57,338 +57,342 @@
 </div>
 
 <script>
-const GOOD_MARK = '🍎';
-const BAD_MARK = '💣';
-const STAR_MARK = '⭐';
+    const GOOD_MARK = '🍎';
+    const BAD_MARK = '💣';
+    const STAR_MARK = '⭐';
 
-const canvas = document.getElementById('gameCanvas');
-const ctx = canvas.getContext('2d');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const bgCanvas = document.getElementById('bgCanvas');
+    const bgCtx = bgCanvas.getContext('2d');
+    
+    const GAME_WIDTH = 400;
+    const GAME_HEIGHT = 600;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.0); 
+    
+    canvas.width = GAME_WIDTH * dpr;
+    canvas.height = GAME_HEIGHT * dpr;
+    ctx.scale(dpr, dpr);
+    
+    bgCanvas.width = GAME_WIDTH * dpr;
+    bgCanvas.height = GAME_HEIGHT * dpr;
+    bgCtx.scale(dpr, dpr);
 
-const bgCanvas = document.getElementById('bgCanvas');
-const bgCtx = bgCanvas.getContext('2d');
+    const startScreen = document.getElementById('startScreen');
+    const gameOverScreen = document.getElementById('gameOverScreen');
+    const finalScoreText = document.getElementById('finalScore');
+    const startBtn = document.getElementById('startBtn');
+    const retryBtn = document.getElementById('retryBtn');
 
-const GAME_WIDTH = 400;
-const GAME_HEIGHT = 600;
-const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
+    let gameState = 'START'; 
+    let score = 0;
+    let animationId;
+    let invincibleUntil = 0;
+    
+    let lastTime = 0;
+    let itemSpawnTimer = 0;
+    let effectFrame = 0;
 
-canvas.width = GAME_WIDTH * dpr;
-canvas.height = GAME_HEIGHT * dpr;
-ctx.scale(dpr, dpr);
+    const TOTAL_LANES = 3;
+    let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
 
-bgCanvas.width = GAME_WIDTH * dpr;
-bgCanvas.height = GAME_HEIGHT * dpr;
-bgCtx.scale(dpr, dpr);
+    const player = { lane: 1, width: 60, height: 60 };
+    let isLeftPressed = false;
+    let isRightPressed = false;
 
-const startScreen = document.getElementById('startScreen');
-const gameOverScreen = document.getElementById('gameOverScreen');
-const finalScoreText = document.getElementById('finalScore');
-const startBtn = document.getElementById('startBtn');
-const retryBtn = document.getElementById('retryBtn');
+    // --- Web Audio API による遅延ゼロ音声管理 ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContext();
 
-let gameState = 'START';
-let score = 0;
-let animationId;
-let invincibleUntil = 0;
+    const audioBuffers = { bgm: null, apple: null, bomb: null, star: null };
 
-let lastTime = 0;
-let itemSpawnTimer = 0;
-let effectFrame = 0;
-
-const TOTAL_LANES = 3;
-let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
-
-const player = { lane: 1, width: 60, height: 60 };
-let isLeftPressed = false;
-let isRightPressed = false;
-
-// --- 音声関連 ---
-const bgm = new Audio('bgm.mp3'); bgm.loop = true; bgm.volume = 0.5;
-
-function createAudioPool(src, size) {
-    const pool = [];
-    for (let i = 0; i < size; i++) {
-        const audio = new Audio(src);
-        audio.preload = 'auto'; // 事前読み込みを推奨
-        pool.push(audio);
+    async function loadAudio(name, url) {
+        try {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            audioBuffers[name] = audioBuffer;
+        } catch (e) {
+            console.warn(`音声ファイル ${url} が読み込めませんでした。`);
+        }
     }
-    return { pool, index: 0 };
-}
 
-// SEの数を少し減らしてメモリ負荷を下げる
-const seApple = createAudioPool('apple.mp3', 5);
-const seBomb = createAudioPool('bomb.mp3', 3);
-const seStar = createAudioPool('star.mp3', 2);
+    loadAudio('bgm', 'bgm.mp3');
+    loadAudio('apple', 'apple.mp3');
+    loadAudio('bomb', 'bomb.mp3');
+    loadAudio('star', 'star.mp3');
 
-function playSE(audioData) {
-    if (!audioData || audioData.pool.length === 0) return;
-    const audio = audioData.pool[audioData.index];
-    
-    // 厳しすぎた読み込みチェックを外し、代わりにtry-catchで安全に頭出しを行う
-    try {
-        audio.currentTime = 0;
-    } catch (e) {
-        // まだデータが読み込まれておらずエラーになる場合は無視して進める
+    function playSE(name) {
+        if (!audioBuffers[name]) return;
+        const source = audioCtx.createBufferSource();
+        source.buffer = audioBuffers[name];
+        source.connect(audioCtx.destination);
+        source.start(0);
     }
-    
-    audio.play().catch(e => console.log("SE再生エラー:", e));
-    
-    audioData.index = (audioData.index + 1) % audioData.pool.length;
-}
 
-// --- オブジェクトプーリング（アイテム） ---
-const MAX_ITEMS = 20; // 画面に出る最大アイテム数を定義
-const itemPool = [];
-for (let i = 0; i < MAX_ITEMS; i++) {
-    itemPool.push({
-        active: false, // 画面に出ているかどうか
-        lane: 0,
-        y: 0,
-        size: 50,
-        type: 'GOOD',
-        mark: GOOD_MARK,
-        speed: 0
+    let bgmSource = null;
+    function playBGM() {
+        if (!audioBuffers['bgm']) return;
+        stopBGM();
+        bgmSource = audioCtx.createBufferSource();
+        bgmSource.buffer = audioBuffers['bgm'];
+        bgmSource.loop = true;
+        
+        const gainNode = audioCtx.createGain();
+        gainNode.gain.value = 0.5;
+        bgmSource.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+        
+        bgmSource.start(0);
+    }
+
+    function stopBGM() {
+        if (bgmSource) {
+            bgmSource.stop();
+            bgmSource = null;
+        }
+    }
+
+    // --- オブジェクトプーリング（ラグ対策） ---
+    const MAX_ITEMS = 20;
+    const itemPool = [];
+    for (let i = 0; i < MAX_ITEMS; i++) {
+        itemPool.push({ active: false, lane: 0, y: 0, size: 50, type: 'GOOD', mark: GOOD_MARK, speed: 0 });
+    }
+
+    function getFreeItem() {
+        for (let i = 0; i < itemPool.length; i++) {
+            if (!itemPool[i].active) return itemPool[i];
+        }
+        return null;
+    }
+
+    // --- 画像管理 ---
+    const playerImg = new Image();
+    playerImg.src = 'リス.png';
+    playerImg.onload = () => { draw(); };
+
+    const bgImg = new Image();
+    bgImg.src = 'back.jpg'; 
+    bgImg.onload = () => {
+        bgCtx.drawImage(bgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+    };
+    bgImg.onerror = () => { 
+        bgCtx.fillStyle = '#f8f9fa';
+        bgCtx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    };
+
+    // --- 操作処理 ---
+    function updatePlayerLane() {
+        if (isLeftPressed && !isRightPressed) player.lane = 0;
+        else if (isRightPressed && !isLeftPressed) player.lane = 2;
+        else player.lane = 1;
+    }
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft') isLeftPressed = true;
+        if (e.key === 'ArrowRight') isRightPressed = true;
+        updatePlayerLane();
     });
-}
+    document.addEventListener('keyup', (e) => {
+        if (e.key === 'ArrowLeft') isLeftPressed = false;
+        if (e.key === 'ArrowRight') isRightPressed = false;
+        updatePlayerLane();
+    });
 
-function getFreeItem() {
-    for (let i = 0; i < itemPool.length; i++) {
-        if (!itemPool[i].active) return itemPool[i];
-    }
-    return null; // 全て使用中（通常は発生しないようにMAX_ITEMSを調整）
-}
+    const setupButton = (id, isLeft) => {
+        const btn = document.getElementById(id);
+        const press = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = true; else isRightPressed = true; updatePlayerLane(); };
+        const release = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = false; else isRightPressed = false; updatePlayerLane(); };
 
-// --- 画像関連 ---
-const playerImg = new Image();
-playerImg.src = 'リス.png';
-playerImg.onload = () => { draw(); };
+        btn.addEventListener('touchstart', press, { passive: false });
+        btn.addEventListener('mousedown', press);
+        btn.addEventListener('touchend', release, { passive: false });
+        btn.addEventListener('mouseup', release);
+        btn.addEventListener('mouseleave', release);
+    };
 
-const bgImg = new Image();
-bgImg.src = 'back.jpg';
-bgImg.onload = () => {
-    bgCtx.drawImage(bgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
-};
-bgImg.onerror = () => {
-    bgCtx.fillStyle = '#f8f9fa';
-    bgCtx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-};
+    setupButton('leftBtn', true);
+    setupButton('rightBtn', false);
 
-// --- 操作関連 ---
-function updatePlayerLane() {
-    if (isLeftPressed && !isRightPressed) player.lane = 0;
-    else if (isRightPressed && !isLeftPressed) player.lane = 2;
-    else player.lane = 1;
-}
-
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'ArrowLeft') isLeftPressed = true;
-    if (e.key === 'ArrowRight') isRightPressed = true;
-    updatePlayerLane();
-});
-document.addEventListener('keyup', (e) => {
-    if (e.key === 'ArrowLeft') isLeftPressed = false;
-    if (e.key === 'ArrowRight') isRightPressed = false;
-    updatePlayerLane();
-});
-
-const setupButton = (id, isLeft) => {
-    const btn = document.getElementById(id);
-    const press = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = true; else isRightPressed = true; updatePlayerLane(); };
-    const release = (e) => { e.preventDefault(); if (isLeft) isLeftPressed = false; else isRightPressed = false; updatePlayerLane(); };
-
-    btn.addEventListener('touchstart', press, { passive: false });
-    btn.addEventListener('mousedown', press);
-    btn.addEventListener('touchend', release, { passive: false });
-    btn.addEventListener('mouseup', release);
-    btn.addEventListener('mouseleave', release);
-};
-
-setupButton('leftBtn', true);
-setupButton('rightBtn', false);
-
-// --- ゲームロジック ---
-function initGame() {
-    score = 0;
-    invincibleUntil = 0;
-    lastTime = performance.now();
-    itemSpawnTimer = 0;
-    effectFrame = 0;
-    
-    // アイテムプールをリセット
-    itemPool.forEach(item => item.active = false);
-
-    isLeftPressed = false;
-    isRightPressed = false;
-    updatePlayerLane();
-    
-    startScreen.classList.add('hidden');
-    gameOverScreen.classList.add('hidden');
-    gameState = 'PLAYING';
-    
-    // スマホでのBGM再生開始エラー対策
-    bgm.play().catch(e => console.log("BGM再生エラー:", e));
-    
-    if (animationId) cancelAnimationFrame(animationId);
-    animationId = requestAnimationFrame(gameLoop);
-}
-
-function gameOver() {
-    gameState = 'GAMEOVER';
-    cancelAnimationFrame(animationId);
-    finalScoreText.textContent = score;
-    gameOverScreen.classList.remove('hidden');
-    bgm.pause();
-}
-
-function spawnItem(deltaTime) {
-    let difficultyScore = Math.max(0, score);
-    let spawnIntervalMs = Math.max(200, 500 - (difficultyScore * 8));
-    
-    itemSpawnTimer += deltaTime;
-    
-    if (itemSpawnTimer > spawnIntervalMs) {
+    // --- ゲームループ関連 ---
+    function initGame() {
+        score = 0; 
+        invincibleUntil = 0;
+        lastTime = performance.now();
         itemSpawnTimer = 0;
+        effectFrame = 0;
         
-        const newItem = getFreeItem();
-        if (!newItem) return; // プールが空なら生成スキップ
-
-        let targetLane = Math.floor(Math.random() * TOTAL_LANES);
-        let rand = Math.random();
-        let type, mark;
-        let isInvincible = Date.now() < invincibleUntil;
+        itemPool.forEach(item => item.active = false);
         
-        let starChance = 0.05;
-        if (difficultyScore > 20) starChance = 0.03;
-        if (difficultyScore > 40) starChance = 0.01;
-        if (isInvincible) starChance = 0;
-
-        if (rand < starChance) { type = 'STAR'; mark = STAR_MARK; }
-        else if (rand < 0.7)   { type = 'GOOD'; mark = GOOD_MARK; }
-        else                   { type = 'BAD';  mark = BAD_MARK; }
+        isLeftPressed = false; 
+        isRightPressed = false; 
+        updatePlayerLane();
         
-        let baseSpeed = 300 + (Math.random() * 150) + (difficultyScore * 10);
+        startScreen.classList.add('hidden'); 
+        gameOverScreen.classList.add('hidden');
+        gameState = 'PLAYING';
         
-        // オブジェクトのプロパティを再設定して「生成」とする
-        newItem.active = true;
-        newItem.lane = targetLane;
-        newItem.y = -50;
-        newItem.type = type;
-        newItem.mark = mark;
-        newItem.speed = baseSpeed;
+        // スマホの音声ロック解除
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+        playBGM();
+        
+        if (animationId) cancelAnimationFrame(animationId);
+        animationId = requestAnimationFrame(gameLoop);
     }
-}
 
-function update(deltaTime) {
-    let playerY = GAME_HEIGHT - player.height - 20;
-    let isInvincible = Date.now() < invincibleUntil;
+    function gameOver() {
+        gameState = 'GAMEOVER';
+        cancelAnimationFrame(animationId);
+        finalScoreText.textContent = score;
+        gameOverScreen.classList.remove('hidden');
+        stopBGM();
+    }
 
-    for (let i = 0; i < itemPool.length; i++) {
-        let item = itemPool[i];
-        if (!item.active) continue; // アクティブでないアイテムは無視
+    function spawnItem(deltaTime) {
+        let difficultyScore = Math.max(0, score);
+        let spawnIntervalMs = Math.max(200, 500 - (difficultyScore * 8)); 
+        
+        itemSpawnTimer += deltaTime;
+        
+        if (itemSpawnTimer > spawnIntervalMs) {
+            itemSpawnTimer = 0; 
+            
+            const newItem = getFreeItem();
+            if (!newItem) return;
 
-        item.y += item.speed * (deltaTime / 1000);
+            let targetLane = Math.floor(Math.random() * TOTAL_LANES);
+            let rand = Math.random();
+            let type, mark;
+            let isInvincible = Date.now() < invincibleUntil;
+            let starChance = 0.05;
+            if (difficultyScore > 20) starChance = 0.03;
+            if (difficultyScore > 40) starChance = 0.01;
+            if (isInvincible) starChance = 0; 
 
-        // 当たり判定
-        if (item.lane === player.lane && item.y + item.size > playerY && item.y < playerY + player.height) {
-            if (item.type === 'STAR') {
-                playSE(seStar);
-                invincibleUntil = Date.now() + 4500;
-                item.active = false; // 削除の代わりに非アクティブ化
-            } else if (item.type === 'GOOD') {
-                playSE(seApple);
-                score++;
-                item.active = false;
-            } else if (item.type === 'BAD') {
-                if (isInvincible) {
-                    playSE(seBomb);
+            if (rand < starChance) { type = 'STAR'; mark = STAR_MARK; }
+            else if (rand < 0.7)   { type = 'GOOD'; mark = GOOD_MARK; }
+            else                   { type = 'BAD';  mark = BAD_MARK; }
+            
+            let baseSpeed = 300 + (Math.random() * 150) + (difficultyScore * 10);
+            
+            newItem.active = true;
+            newItem.lane = targetLane; 
+            newItem.y = -50; 
+            newItem.type = type; 
+            newItem.mark = mark;
+            newItem.speed = baseSpeed; 
+        }
+    }
+
+    function update(deltaTime) {
+        let playerY = GAME_HEIGHT - player.height - 20;
+        let isInvincible = Date.now() < invincibleUntil;
+
+        for (let i = 0; i < itemPool.length; i++) {
+            let item = itemPool[i];
+            if (!item.active) continue;
+
+            item.y += item.speed * (deltaTime / 1000);
+
+            if (item.lane === player.lane && item.y + item.size > playerY && item.y < playerY + player.height) {
+                if (item.type === 'STAR') {
+                    playSE('star'); 
+                    invincibleUntil = Date.now() + 4500; 
                     item.active = false;
-                } else {
-                    playSE(seBomb);
-                    gameOver();
-                    return;
+                } else if (item.type === 'GOOD') {
+                    playSE('apple'); 
+                    score++; 
+                    item.active = false;
+                } else if (item.type === 'BAD') {
+                    if (isInvincible) { 
+                        playSE('bomb'); 
+                        item.active = false; 
+                    } else { 
+                        playSE('bomb'); 
+                        gameOver(); 
+                        return; 
+                    }
                 }
+            } 
+            else if (item.y > GAME_HEIGHT) {
+                if (item.type === 'GOOD') score--;
+                item.active = false;
             }
         }
-        // 画面外に出た判定
-        else if (item.y > GAME_HEIGHT) {
-            if (item.type === 'GOOD') score--;
-            item.active = false;
-        }
-    }
-}
-
-function draw() {
-    ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
-    let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
-    
-    let isInvincible = Date.now() < invincibleUntil;
-    let timeRemaining = invincibleUntil - Date.now();
-    let shouldDrawPlayer = true;
-
-    if (isInvincible && timeRemaining <= 1000) {
-        if (Math.floor(Date.now() / 100) % 2 === 0) shouldDrawPlayer = false;
     }
 
-    if (shouldDrawPlayer) {
-        // --- 虹色エフェクト ---
-        if (isInvincible) {
-            effectFrame += 2; // 色の変化スピード
-            ctx.shadowBlur = 20;
-            // HSLカラーを使って虹色に変化させる
-            ctx.shadowColor = `hsl(${effectFrame % 360}, 100%, 60%)`;
-        }
+    function draw() {
+        ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-        if (playerImg.complete && playerImg.naturalWidth > 0) {
-            ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
-        } else {
-            ctx.fillStyle = '#007bff';
-            ctx.fillRect(playerX, playerY, player.width, player.height);
-        }
-
-        ctx.shadowBlur = 0; // 影（エフェクト）をリセット
-    }
-
-    ctx.font = '50px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    
-    for (let i = 0; i < itemPool.length; i++) {
-        let item = itemPool[i];
-        if (!item.active) continue;
+        let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
+        let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
         
-        let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
-        let itemY = Math.floor(item.y);
-        ctx.fillText(item.mark, itemX, itemY);
+        let isInvincible = Date.now() < invincibleUntil;
+        let timeRemaining = invincibleUntil - Date.now();
+        let shouldDrawPlayer = true;
+
+        if (isInvincible && timeRemaining <= 1000) {
+            if (Math.floor(Date.now() / 100) % 2 === 0) shouldDrawPlayer = false; 
+        }
+
+        if (shouldDrawPlayer) {
+            if (isInvincible) {
+                effectFrame += 5; // 虹色の変化スピード
+                ctx.shadowBlur = 20; 
+                ctx.shadowColor = `hsl(${effectFrame % 360}, 100%, 60%)`;
+            }
+
+            if (playerImg.complete && playerImg.naturalWidth > 0) {
+                ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
+            } else {
+                ctx.fillStyle = '#007bff';
+                ctx.fillRect(playerX, playerY, player.width, player.height);
+            }
+
+            ctx.shadowBlur = 0;
+        }
+
+        ctx.font = '50px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (let i = 0; i < itemPool.length; i++) {
+            let item = itemPool[i];
+            if (!item.active) continue;
+            let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
+            let itemY = Math.floor(item.y);
+            ctx.fillText(item.mark, itemX, itemY);
+        }
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+        ctx.fillRect(5, 5, 120, 35);
+        ctx.fillStyle = '#333';
+        ctx.font = 'bold 24px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`スコア: ${score}`, 15, 10);
     }
 
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.fillRect(5, 5, 120, 35);
-    ctx.fillStyle = '#333';
-    ctx.font = 'bold 24px sans-serif';
-    ctx.textAlign = 'left';
-    ctx.fillText(`スコア: ${score}`, 15, 10);
-}
+    function gameLoop(currentTime) {
+        if (gameState !== 'PLAYING') return;
+        
+        let deltaTime = currentTime - lastTime;
+        lastTime = currentTime;
+        
+        if (deltaTime > 100) deltaTime = 16;
+        
+        spawnItem(deltaTime); 
+        update(deltaTime); 
+        draw();
+        
+        animationId = requestAnimationFrame(gameLoop);
+    }
 
-function gameLoop(currentTime) {
-    if (gameState !== 'PLAYING') return;
+    startBtn.onclick = initGame;
+    retryBtn.onclick = initGame;
     
-    let deltaTime = currentTime - lastTime;
-    lastTime = currentTime;
-    
-    // ラグスパイク（極端な遅延）対策
-    if (deltaTime > 100) deltaTime = 16;
-    
-    spawnItem(deltaTime);
-    update(deltaTime);
-    draw();
-    
-    animationId = requestAnimationFrame(gameLoop);
-}
-
-startBtn.onclick = initGame;
-retryBtn.onclick = initGame;
-
 </script>
 </body>
 </html>
