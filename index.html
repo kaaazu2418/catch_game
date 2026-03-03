@@ -7,13 +7,11 @@
     <style>
         body { margin: 0; padding: 0; background-color: #333; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; touch-action: none; overflow: hidden; }
         
-        /* レイヤーを重ねるためのWrapper設定 */
-        #gameWrapper { width: 100%; max-width: 400px; position: relative; height: 80vh; max-height: 600px; }
+        #gameWrapper { width: 100%; max-width: 400px; position: relative; height: 80vh; max-height: 600px; background-color: #f8f9fa; }
         
-        /* レイヤー（Canvas）を絶対配置でピッタリ重ねる */
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: block; }
-        #bgCanvas { z-index: 10; } /* 背景レイヤー（後ろ） */
-        #gameCanvas { z-index: 20; } /* ゲームレイヤー（手前・動く） */
+        #bgCanvas { z-index: 10; }
+        #gameCanvas { z-index: 20; }
 
         .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.85); color: white; text-align: center; z-index: 100; }
         .hidden { display: none !important; }
@@ -63,18 +61,16 @@
     const BAD_MARK = '💣';
     const STAR_MARK = '⭐';
 
-    // ゲーム用キャンバス
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
     
-    // 背景用キャンバス
     const bgCanvas = document.getElementById('bgCanvas');
     const bgCtx = bgCanvas.getContext('2d');
     
-    // スマホの高解像度対応
+    // 【変更】dprを1固定に近づけて、描画負荷そのものを軽減する
     const GAME_WIDTH = 400;
     const GAME_HEIGHT = 600;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.5); 
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.25); // 上限をさらに低く
     
     canvas.width = GAME_WIDTH * dpr;
     canvas.height = GAME_HEIGHT * dpr;
@@ -97,7 +93,10 @@
     
     let lastTime = 0;
     let itemSpawnTimer = 0;
-    let effectFrame = 0; // エフェクト用の独立したカウンター
+    let effectFrame = 0;
+
+    // 【追加】DeltaTimeスムージング用
+    let smoothedDelta = 16.6; 
 
     const TOTAL_LANES = 3;
     let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
@@ -107,12 +106,14 @@
     let isLeftPressed = false;
     let isRightPressed = false;
 
+    // 音声（エラー回避のダミー対応を追加）
     const bgm = new Audio('bgm.mp3'); bgm.loop = true; bgm.volume = 0.5;
     const seApple = new Audio('apple.mp3');
     const seBomb = new Audio('bomb.mp3');
     const seStar = new Audio('star.mp3');
 
     function playSE(audioObj) {
+        if(!audioObj) return;
         audioObj.currentTime = 0;
         audioObj.play().catch(e => console.log("音声再生エラー:", e));
     }
@@ -121,12 +122,15 @@
     playerImg.src = 'リス.png';
     playerImg.onload = () => { draw(); };
 
-    // --- 【追加】背景画像の読み込みと描画 ---
     const bgImg = new Image();
-    bgImg.src = 'back.jpg'; // 背景画像を指定
+    bgImg.src = 'back.jpg';
     bgImg.onload = () => {
-        // 背景は動かないので、読み込まれた時に1回だけ描画する（超軽量）
         bgCtx.drawImage(bgImg, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+    };
+    bgImg.onerror = () => {
+        console.log("背景画像(back.jpg)が見つかりません。デフォルトの背景を使用します。");
+        bgCtx.fillStyle = '#f8f9fa';
+        bgCtx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     };
 
     function updatePlayerLane() {
@@ -168,6 +172,7 @@
         lastTime = performance.now();
         itemSpawnTimer = 0;
         effectFrame = 0;
+        smoothedDelta = 16.6; // リセット
         
         isLeftPressed = false; 
         isRightPressed = false; 
@@ -191,11 +196,11 @@
         bgm.pause();
     }
 
-    function spawnItem(deltaTime) {
+    function spawnItem(dt) {
         let difficultyScore = Math.max(0, score);
         let spawnIntervalMs = Math.max(200, 500 - (difficultyScore * 8)); 
         
-        itemSpawnTimer += deltaTime;
+        itemSpawnTimer += dt;
         
         if (itemSpawnTimer > spawnIntervalMs) {
             itemSpawnTimer = 0; 
@@ -213,6 +218,7 @@
             else if (rand < 0.7)   { type = 'GOOD'; mark = GOOD_MARK; }
             else                   { type = 'BAD';  mark = BAD_MARK; }
             
+            // スピードも小数点で保持する
             let baseSpeed = 300 + (Math.random() * 150) + (difficultyScore * 10);
             
             items.push({
@@ -226,13 +232,15 @@
         }
     }
 
-    function update(deltaTime) {
+    function update(dt) {
         let playerY = GAME_HEIGHT - player.height - 20;
         let isInvincible = Date.now() < invincibleUntil;
 
         for (let i = items.length - 1; i >= 0; i--) {
             let item = items[i];
-            item.y += item.speed * (deltaTime / 1000);
+            
+            // 小数のままY座標を更新する
+            item.y += item.speed * (dt / 1000);
 
             if (item.lane === player.lane && item.y + item.size > playerY && item.y < playerY + player.height) {
                 if (item.type === 'STAR') {
@@ -252,12 +260,11 @@
     }
 
     function draw() {
-        // --- 【変更】毎フレームの背景描画をスキップ ---
-        // 背景は bgCanvas が描画しているので、ゲーム用のCanvasは透明にしておく
         ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-        let playerY = Math.floor(GAME_HEIGHT - player.height - 20);
-        let playerX = Math.floor((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
+        // 【変更】描画の瞬間に Math.round で整数にする
+        let playerY = Math.round(GAME_HEIGHT - player.height - 20);
+        let playerX = Math.round((player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2));
         
         let isInvincible = Date.now() < invincibleUntil;
         let timeRemaining = invincibleUntil - Date.now();
@@ -269,7 +276,6 @@
 
         if (shouldDrawPlayer) {
             if (isInvincible) {
-                // deltaTimeで管理しているとオーラの色が変わらなくなるため、エフェクト専用フレームを加算
                 effectFrame++; 
                 ctx.fillStyle = `hsla(${(effectFrame * 5) % 360}, 100%, 50%, 0.6)`;
                 ctx.beginPath();
@@ -289,12 +295,11 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         for (let item of items) {
-            let itemX = Math.floor((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
-            let itemY = Math.floor(item.y);
+            let itemX = Math.round((item.lane * LANE_WIDTH) + (LANE_WIDTH / 2));
+            let itemY = Math.round(item.y); // Y座標を整数に丸めて描画
             ctx.fillText(item.mark, itemX, itemY);
         }
 
-        // スコアの背景を少し見やすくする
         ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
         ctx.fillRect(5, 5, 120, 35);
         ctx.fillStyle = '#333';
@@ -306,13 +311,17 @@
     function gameLoop(currentTime) {
         if (gameState !== 'PLAYING') return;
         
-        let deltaTime = currentTime - lastTime;
+        let rawDelta = currentTime - lastTime;
         lastTime = currentTime;
         
-        if (deltaTime > 100) deltaTime = 100;
+        // 【追加】極端な変動（タブ切り替えなど）をカット
+        if (rawDelta > 100) rawDelta = 16.6;
         
-        spawnItem(deltaTime); 
-        update(deltaTime); 
+        // 【追加】DeltaTimeを滑らかにする（Low-Pass Filter）
+        smoothedDelta = (smoothedDelta * 0.8) + (rawDelta * 0.2);
+        
+        spawnItem(smoothedDelta); 
+        update(smoothedDelta); 
         draw();
         
         animationId = requestAnimationFrame(gameLoop);
