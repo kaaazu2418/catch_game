@@ -7,12 +7,12 @@
     <style>
         body { margin: 0; padding: 0; background-color: #333; display: flex; flex-direction: column; align-items: center; font-family: sans-serif; touch-action: none; overflow: hidden; }
         #gameWrapper { width: 100%; max-width: 400px; position: relative; background-color: #f8f9fa; height: 80vh; max-height: 600px; }
+        /* CSS上のサイズ指定はそのまま（高画質化は内部で行うため） */
         canvas { display: block; width: 100%; height: 100%; }
         
         .screen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; background: rgba(0, 0, 0, 0.85); color: white; text-align: center; z-index: 100; }
         .hidden { display: none !important; }
         
-        /* タイトルロゴ風の装飾 */
         h1 { font-size: 28px; color: #ffeb3b; text-shadow: 2px 2px 4px rgba(0,0,0,0.5); margin-bottom: 10px; }
         
         button { padding: 15px 30px; font-size: 20px; font-weight: bold; cursor: pointer; border: none; border-radius: 8px; background: #007bff; color: white; margin-top: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); pointer-events: auto; }
@@ -26,7 +26,7 @@
 <body>
 
 <div id="gameWrapper">
-    <canvas id="gameCanvas" width="400" height="600"></canvas>
+    <canvas id="gameCanvas"></canvas>
     
     <div id="startScreen" class="screen">
         <h1>Apple-Loving Squirrel</h1>
@@ -59,29 +59,35 @@
 
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
+    
+    // --- 【画質改善】スマホの高解像度ディスプレイ（Retina等）に対応 ---
+    const GAME_WIDTH = 400;
+    const GAME_HEIGHT = 600;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = GAME_WIDTH * dpr;
+    canvas.height = GAME_HEIGHT * dpr;
+    ctx.scale(dpr, dpr);
+    // ----------------------------------------------------------------
+
     const startScreen = document.getElementById('startScreen');
     const gameOverScreen = document.getElementById('gameOverScreen');
     const finalScoreText = document.getElementById('finalScore');
     const startBtn = document.getElementById('startBtn');
     const retryBtn = document.getElementById('retryBtn');
 
-    // 画像の読み込み
     const playerImg = new Image();
     playerImg.src = 'リス.png';
 
-    // --- 【追加】音声ファイルの読み込み ---
-    // ※同じフォルダに以下の名前の音声ファイルを入れてください
     const bgm = new Audio('bgm.mp3');
-    bgm.loop = true; // BGMはループ再生
-    bgm.volume = 0.5; // BGMの音量（0.0 〜 1.0）
+    bgm.loop = true;
+    bgm.volume = 0.5;
 
     const seApple = new Audio('apple.mp3');
     const seBomb = new Audio('bomb.mp3');
     const seStar = new Audio('star.mp3');
 
-    // 効果音を連続で鳴らすための関数
     function playSE(audioObj) {
-        audioObj.currentTime = 0; // 再生位置を最初に戻す（連続で取った時用）
+        audioObj.currentTime = 0;
         audioObj.play().catch(e => console.log("音声再生エラー:", e));
     }
 
@@ -92,7 +98,7 @@
     let invincibleUntil = 0;
 
     const TOTAL_LANES = 3;
-    let LANE_WIDTH = canvas.width / TOTAL_LANES;
+    let LANE_WIDTH = GAME_WIDTH / TOTAL_LANES;
 
     const player = {
         lane: 1, width: 60, height: 60, color: '#007bff'
@@ -159,7 +165,6 @@
         gameOverScreen.classList.add('hidden');
         gameState = 'PLAYING';
         
-        // --- 【追加】BGMの再生開始 ---
         bgm.currentTime = 0;
         bgm.play().catch(e => console.log("BGM再生エラー:", e));
         
@@ -172,8 +177,6 @@
         cancelAnimationFrame(animationId);
         finalScoreText.textContent = score;
         gameOverScreen.classList.remove('hidden');
-        
-        // --- 【追加】BGMを止める ---
         bgm.pause();
     }
 
@@ -216,7 +219,7 @@
     }
 
     function update() {
-        let playerY = canvas.height - player.height - 20;
+        let playerY = GAME_HEIGHT - player.height - 20;
         let isInvincible = Date.now() < invincibleUntil;
 
         for (let i = items.length - 1; i >= 0; i--) {
@@ -228,29 +231,25 @@
                 item.y < playerY + player.height) {
                 
                 if (item.type === 'STAR') {
-                    // --- 【追加】スター取得音 ---
                     playSE(seStar);
                     invincibleUntil = Date.now() + 4500;
                     items.splice(i, 1);
                 } else if (item.type === 'GOOD') {
-                    // --- 【追加】リンゴかじる音 ---
                     playSE(seApple);
                     score++; 
                     items.splice(i, 1);
                 } else if (item.type === 'BAD') {
                     if (isInvincible) {
-                        // 無敵中に爆弾を壊した時にもポン！と鳴らすと気持ちいいです
                         playSE(seBomb);
                         items.splice(i, 1);
                     } else {
-                        // --- 【追加】ゲームオーバー爆発音 ---
                         playSE(seBomb);
                         gameOver(); 
                         return;
                     }
                 }
             } 
-            else if (item.y > canvas.height) {
+            else if (item.y > GAME_HEIGHT) {
                 if (item.type === 'GOOD') {
                     score--;
                 }
@@ -261,9 +260,9 @@
 
     function draw() {
         ctx.fillStyle = '#f8f9fa';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-        let playerY = canvas.height - player.height - 20;
+        let playerY = GAME_HEIGHT - player.height - 20;
         let playerX = (player.lane * LANE_WIDTH) + (LANE_WIDTH / 2) - (player.width / 2);
         
         let isInvincible = Date.now() < invincibleUntil;
@@ -279,14 +278,16 @@
         }
 
         if (shouldDrawPlayer) {
+            // --- 【ラグ改善】重い shadowBlur をやめて、背後に半透明のオーラを描く ---
+            if (isInvincible) {
+                ctx.fillStyle = `hsla(${(frameCount * 15) % 360}, 100%, 50%, 0.6)`;
+                ctx.beginPath();
+                ctx.arc(playerX + player.width / 2, playerY + player.height / 2, player.width / 2 + 15, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
             if (playerImg.complete && playerImg.naturalWidth > 0) {
-                if (isInvincible) {
-                    ctx.shadowBlur = 25; 
-                    ctx.shadowColor = `hsl(${(frameCount * 15) % 360}, 100%, 50%)`;
-                }
-                
                 ctx.drawImage(playerImg, playerX, playerY, player.width, player.height);
-                ctx.shadowBlur = 0; 
             } else {
                 ctx.fillStyle = player.color;
                 ctx.fillRect(playerX, playerY, player.width, player.height);
